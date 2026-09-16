@@ -1,4 +1,6 @@
-FROM rust:1.98-bookworm AS builder
+FROM rust:1.98-alpine AS builder
+
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
 
 WORKDIR /app
 
@@ -9,16 +11,11 @@ COPY web ./web
 
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+FROM alpine:3.21
 
-RUN useradd \
-    --system \
-    --uid 10001 \
-    --create-home \
-    tinylog \
- && apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates wget \
- && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ca-certificates wget \
+ && addgroup -S -g 10001 tinylog \
+ && adduser -S -D -H -u 10001 -G tinylog tinylog
 
 WORKDIR /app
 
