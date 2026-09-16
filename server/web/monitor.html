@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tiny Log — Monitor</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Tiny Log</div>
+    <nav>
+      <a href="/">Logs</a>
+      <a href="/monitor" class="active">Monitor</a>
+      <a href="/swagger">API</a>
+      <a href="/settings">Settings</a>
+      <span id="nav-badge" class="nav-badge" hidden></span>
+      <span id="nav-user" class="nav-user"></span>
+      <button id="logout-btn" type="button" class="linkish">Logout</button>
+    </nav>
+  </header>
+
+  <main class="monitor">
+    <section>
+      <div class="section-head">
+        <h1>Hosts</h1>
+        <span id="refresh-hint" class="muted">auto-refresh 30s</span>
+      </div>
+      <div id="host-cards" class="host-cards"></div>
+    </section>
+
+    <section>
+      <h2>Services</h2>
+      <div class="log-table-wrap">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>Host</th>
+              <th>Service</th>
+              <th>Kind</th>
+              <th>Status</th>
+              <th>Latency</th>
+              <th>Checked</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody id="service-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/monitor.js"></script>
+</body>
+</html>

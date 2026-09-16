@@ -1,0 +1,22 @@
+# Example agent config
+system_interval_secs = 60
+service_interval_secs = 120
+docker = true
+disk_path = "/"
+
+[[service]]
+name = "nginx"
+kind = "http"
+url = "http://127.0.0.1/health"
+timeout_ms = 2000
+
+[[service]]
+name = "postgres"
+kind = "tcp"
+addr = "127.0.0.1:5432"
+timeout_ms = 2000
+
+[[service]]
+name = "sshd"
+kind = "process"
+match = "sshd"

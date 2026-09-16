@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tiny Log — Setup</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <h1>Tiny Log</h1>
+    <p class="muted">Create the first admin account</p>
+    <form id="setup-form" autocomplete="on">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" required autofocus />
+
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" required minlength="12" />
+
+      <label for="confirm">Confirm password</label>
+      <input id="confirm" name="confirm" type="password" required minlength="12" />
+
+      <p id="setup-error" class="error" hidden></p>
+      <button type="submit">Create admin</button>
+    </form>
+  </main>
+  <script src="/setup.js"></script>
+</body>
+</html>

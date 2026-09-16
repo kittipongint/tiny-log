@@ -1,0 +1,454 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Tiny Log API",
+    "version": "1.0.0",
+    "description": "Test log ingest and host/service monitoring.\n\n**Write APIs** need `Authorize` with Bearer API key (`TINY_LOG_API_KEY`) or client token (`TINY_LOG_CLIENT_TOKEN`).\n\n**Read APIs** need an admin session cookie (login first) unless `TINY_LOG_AUTH_MODE=anonymous`."
+  },
+  "servers": [
+    { "url": "/", "description": "Current host" }
+  ],
+  "tags": [
+    { "name": "health", "description": "Liveness" },
+    { "name": "auth", "description": "Login / setup / session" },
+    { "name": "logs", "description": "Write and read logs" },
+    { "name": "metrics", "description": "System and service monitoring" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API_KEY",
+        "description": "Server API key for POST /api/v1/logs* and POST /api/v1/metrics/batch"
+      },
+      "ClientToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "CLIENT_TOKEN",
+        "description": "Browser client token for POST /api/v1/client/logs only"
+      },
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "tiny_log_session",
+        "description": "Set automatically after POST /api/auth/login (use Authorize or login via UI)"
+      }
+    },
+    "schemas": {
+      "NewLog": {
+        "type": "object",
+        "required": ["app", "level", "message"],
+        "properties": {
+          "app": { "type": "string", "example": "wordyguru" },
+          "level": {
+            "type": "string",
+            "enum": ["debug", "info", "warn", "error", "fatal"],
+            "example": "error"
+          },
+          "message": { "type": "string", "example": "MySQL timeout" },
+          "timestamp": {
+            "type": "string",
+            "example": "2026-09-16T15:20:31.123Z",
+            "description": "RFC3339 or unix ms; omitted = server UTC now"
+          },
+          "source": { "type": "string", "example": "server" },
+          "meta": {
+            "type": "object",
+            "additionalProperties": true,
+            "example": { "route": "/search", "status": 504 }
+          }
+        }
+      },
+      "BatchLogs": {
+        "type": "object",
+        "required": ["logs"],
+        "properties": {
+          "logs": {
+            "type": "array",
+            "maxItems": 500,
+            "items": { "$ref": "#/components/schemas/NewLog" }
+          }
+        }
+      },
+      "MetricsBatch": {
+        "type": "object",
+        "required": ["host"],
+        "properties": {
+          "host": { "type": "string", "example": "web-1" },
+          "timestamp": {
+            "type": "string",
+            "example": "2026-09-16T02:00:00Z"
+          },
+          "system": {
+            "type": "object",
+            "properties": {
+              "cpu_pct": { "type": "number", "example": 12.5 },
+              "mem_used_bytes": { "type": "integer", "example": 1073741824 },
+              "mem_total_bytes": { "type": "integer", "example": 4294967296 },
+              "disk_used_bytes": { "type": "integer", "example": 50000000000 },
+              "disk_total_bytes": { "type": "integer", "example": 100000000000 },
+              "load1": { "type": "number", "example": 0.4 }
+            }
+          },
+          "services": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "required": ["name", "kind", "status"],
+              "properties": {
+                "name": { "type": "string", "example": "nginx" },
+                "kind": {
+                  "type": "string",
+                  "enum": ["http", "tcp", "process", "docker"],
+                  "example": "http"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["up", "down", "unknown"],
+                  "example": "up"
+                },
+                "latency_ms": { "type": "integer", "example": 18 },
+                "message": { "type": "string", "example": "200" },
+                "meta": { "type": "object", "additionalProperties": true }
+              }
+            }
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "example": "admin" },
+          "password": { "type": "string", "format": "password" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "status": { "type": "string", "example": "ok" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/info": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Server info",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Login (sets session cookie)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Logged in; cookie set" },
+          "401": { "description": "Invalid credentials" }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Current auth state",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Logout",
+        "security": [{ "SessionCookie": [] }],
+        "responses": { "200": { "description": "Logged out" } }
+      }
+    },
+    "/api/v1/logs": {
+      "post": {
+        "tags": ["logs"],
+        "summary": "Write a single log",
+        "security": [{ "ApiKey": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NewLog" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Inserted" },
+          "400": { "description": "Bad request" },
+          "401": { "description": "Unauthorized" }
+        }
+      },
+      "get": {
+        "tags": ["logs"],
+        "summary": "List / search logs",
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          { "name": "app", "in": "query", "schema": { "type": "string" } },
+          {
+            "name": "level",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["debug", "info", "warn", "error", "fatal"]
+            }
+          },
+          { "name": "source", "in": "query", "schema": { "type": "string" } },
+          { "name": "search", "in": "query", "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "schema": { "type": "string" } },
+          { "name": "to", "in": "query", "schema": { "type": "string" } },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 100, "maximum": 500 }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": { "type": "integer", "default": 0 }
+          }
+        ],
+        "responses": {
+          "200": { "description": "OK" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/logs/batch": {
+      "post": {
+        "tags": ["logs"],
+        "summary": "Write a batch of logs",
+        "security": [{ "ApiKey": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BatchLogs" },
+              "example": {
+                "logs": [
+                  {
+                    "app": "wordyguru",
+                    "level": "info",
+                    "message": "request completed"
+                  },
+                  {
+                    "app": "nginx",
+                    "level": "error",
+                    "message": "upstream timeout"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "All inserted" },
+          "413": { "description": "Too large" }
+        }
+      }
+    },
+    "/api/v1/logs/{id}": {
+      "get": {
+        "tags": ["logs"],
+        "summary": "Get one log by id",
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "OK" },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/api/v1/client/logs": {
+      "post": {
+        "tags": ["logs"],
+        "summary": "Write a browser/client log",
+        "security": [{ "ClientToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NewLog" },
+              "example": {
+                "app": "wordyguru-web",
+                "level": "error",
+                "message": "fetch failed",
+                "source": "browser",
+                "meta": { "endpoint": "/api/search" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Inserted" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/metrics/batch": {
+      "post": {
+        "tags": ["metrics"],
+        "summary": "Ingest host system sample and/or service checks",
+        "description": "Used by tiny-log-agent. `system` and `services` are both optional, but at least one is required.",
+        "security": [{ "ApiKey": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MetricsBatch" },
+              "examples": {
+                "systemOnly": {
+                  "summary": "System monitoring only",
+                  "value": {
+                    "host": "web-1",
+                    "system": {
+                      "cpu_pct": 12.5,
+                      "mem_used_bytes": 1073741824,
+                      "mem_total_bytes": 4294967296,
+                      "disk_used_bytes": 50000000000,
+                      "disk_total_bytes": 100000000000,
+                      "load1": 0.4
+                    }
+                  }
+                },
+                "servicesOnly": {
+                  "summary": "Service checks only",
+                  "value": {
+                    "host": "web-1",
+                    "services": [
+                      {
+                        "name": "nginx",
+                        "kind": "http",
+                        "status": "up",
+                        "latency_ms": 18,
+                        "message": "200"
+                      },
+                      {
+                        "name": "postgres",
+                        "kind": "tcp",
+                        "status": "up",
+                        "latency_ms": 3,
+                        "message": "connected"
+                      }
+                    ]
+                  }
+                },
+                "combined": {
+                  "summary": "System + services",
+                  "value": {
+                    "host": "web-1",
+                    "system": {
+                      "cpu_pct": 8.0,
+                      "mem_used_bytes": 2048000000,
+                      "mem_total_bytes": 8192000000,
+                      "disk_used_bytes": 40000000000,
+                      "disk_total_bytes": 200000000000,
+                      "load1": 0.2
+                    },
+                    "services": [
+                      {
+                        "name": "api",
+                        "kind": "docker",
+                        "status": "up",
+                        "message": "docker healthy"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Stored" },
+          "400": { "description": "Bad request" },
+          "401": { "description": "Unauthorized" },
+          "413": { "description": "Too many services" }
+        }
+      }
+    },
+    "/api/v1/metrics/overview": {
+      "get": {
+        "tags": ["metrics"],
+        "summary": "Latest host samples + service statuses",
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": { "description": "OK" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/metrics/hosts": {
+      "get": {
+        "tags": ["metrics"],
+        "summary": "List known hosts",
+        "security": [{ "SessionCookie": [] }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/v1/metrics/history": {
+      "get": {
+        "tags": ["metrics"],
+        "summary": "Metrics history",
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["host", "service"] }
+          },
+          { "name": "host", "in": "query", "schema": { "type": "string" } },
+          { "name": "service", "in": "query", "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "schema": { "type": "string" } },
+          { "name": "to", "in": "query", "schema": { "type": "string" } },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 100, "maximum": 500 }
+          }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}

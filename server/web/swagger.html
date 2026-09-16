@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tiny Log — API</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css" />
+  <style>
+    body { margin: 0; background: #0f1419; }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.75rem 1.25rem;
+      border-bottom: 1px solid #2a3542;
+      background: #1a222c;
+      color: #e7eef6;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    }
+    .top a { color: #3d9cf0; text-decoration: none; margin-left: 0.85rem; }
+    .top .brand { font-weight: 700; }
+    .hint {
+      color: #8b9aab;
+      font-size: 0.85rem;
+      padding: 0.6rem 1.25rem;
+      border-bottom: 1px solid #2a3542;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    }
+    #swagger-ui .swagger-ui .topbar { display: none; }
+    #swagger-ui .swagger-ui { font-family: "IBM Plex Sans", "Segoe UI", sans-serif; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <span class="brand">Tiny Log API</span>
+      <a href="/">Logs</a>
+      <a href="/monitor">Monitor</a>
+      <a href="/settings">Settings</a>
+    </div>
+    <a href="/openapi.json">openapi.json</a>
+  </div>
+  <p class="hint">
+    Use <strong>Authorize</strong>: Bearer API key for write log/metrics;
+    login first (or cookie) for read endpoints.
+    Client logs use the client token scheme.
+  </p>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: "/openapi.json",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      persistAuthorization: true,
+      tryItOutEnabled: true,
+      displayRequestDuration: true,
+      presets: [SwaggerUIBundle.presets.apis],
+      layout: "BaseLayout",
+      withCredentials: true
+    });
+  </script>
+</body>
+</html>

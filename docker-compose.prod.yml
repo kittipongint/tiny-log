@@ -1,35 +1,26 @@
 services:
   tiny-log:
     image: tiny-log:latest
-
     container_name: tiny-log
-
     restart: unless-stopped
-
     ports:
       - "${TINY_LOG_PORT:-8080}:${TINY_LOG_PORT:-8080}"
-
     environment:
       TINY_LOG_HOST: 0.0.0.0
       TINY_LOG_PORT: ${TINY_LOG_PORT:-8080}
-      TINY_LOG_DATABASE: /data/logs.db
+      TINY_LOG_LOGS_DATABASE: /data/logs.db
+      TINY_LOG_SYSTEM_DATABASE: /data/system.db
+      TINY_LOG_METRICS_DATABASE: /data/metrics.db
       TINY_LOG_WEB_DIR: /app/web
-
       TINY_LOG_API_KEY: ${TINY_LOG_API_KEY}
       TINY_LOG_CLIENT_TOKEN: ${TINY_LOG_CLIENT_TOKEN}
-
-      TINY_LOG_REQUIRE_AUTH: ${TINY_LOG_REQUIRE_AUTH:-true}
-
+      TINY_LOG_AUTH_MODE: ${TINY_LOG_AUTH_MODE:-login}
       TINY_LOG_RETENTION_DAYS: ${TINY_LOG_RETENTION_DAYS:-10}
       TINY_LOG_SESSION_DAYS: ${TINY_LOG_SESSION_DAYS:-7}
-
       TINY_LOG_COOKIE_SECURE: ${TINY_LOG_COOKIE_SECURE:-true}
-
       RUST_LOG: ${RUST_LOG:-info}
-
     volumes:
       - tiny-log-data:/data
-
     healthcheck:
       test:
         [
@@ -43,6 +34,27 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  tiny-log-agent:
+    image: tiny-log-agent:latest
+    container_name: tiny-log-agent
+    profiles: ["agent"]
+    restart: unless-stopped
+    environment:
+      TINY_LOG_URL: ${TINY_LOG_URL:-http://tiny-log:8080}
+      TINY_LOG_API_KEY: ${TINY_LOG_API_KEY}
+      TINY_LOG_HOST_NAME: ${TINY_LOG_HOST_NAME:-prod-host}
+      TINY_LOG_SYSTEM_INTERVAL_SECS: ${TINY_LOG_SYSTEM_INTERVAL_SECS:-60}
+      TINY_LOG_SERVICE_INTERVAL_SECS: ${TINY_LOG_SERVICE_INTERVAL_SECS:-120}
+      TINY_LOG_DOCKER: "true"
+      TINY_LOG_DOCKER_SOCK: /var/run/docker.sock
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 64m
+    cpus: 0.25
+    depends_on:
+      - tiny-log
 
 volumes:
   tiny-log-data:

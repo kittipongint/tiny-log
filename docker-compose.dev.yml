@@ -1,44 +1,83 @@
 services:
   tiny-log:
     image: rust:1.98-bookworm
-
     working_dir: /app
-
-    entrypoint:
-      - cargo
-      - run
-      - --bin
-      - tiny-log
-      - --
+    # Build once, then run the binary so restarts are fast and the port
+    # is only published after the app is actually listening.
+    entrypoint: ["/bin/bash", "-c"]
     command:
-      - serve
-
+      - |
+        set -euo pipefail
+        export PATH="/usr/local/cargo/bin:$${PATH}"
+        echo "Building tiny-log (first run can take 1-2 minutes)..."
+        cargo build -p tiny-log
+        echo "Starting tiny-log..."
+        exec ./target/debug/tiny-log serve
     ports:
       - "${TINY_LOG_PORT:-8080}:${TINY_LOG_PORT:-8080}"
-
     environment:
       TINY_LOG_HOST: 0.0.0.0
       TINY_LOG_PORT: ${TINY_LOG_PORT:-8080}
-      TINY_LOG_DATABASE: /data/logs.db
-      TINY_LOG_WEB_DIR: /app/web
-
+      TINY_LOG_LOGS_DATABASE: /data/logs.db
+      TINY_LOG_SYSTEM_DATABASE: /data/system.db
+      TINY_LOG_METRICS_DATABASE: /data/metrics.db
+      TINY_LOG_WEB_DIR: /app/server/web
       TINY_LOG_API_KEY: dev-api-key
       TINY_LOG_CLIENT_TOKEN: dev-client-token
-
-      TINY_LOG_REQUIRE_AUTH: "true"
-
+      # Dev default: no login wall. Set TINY_LOG_AUTH_MODE=login to test auth.
+      TINY_LOG_AUTH_MODE: ${TINY_LOG_AUTH_MODE:-anonymous}
       TINY_LOG_RETENTION_DAYS: 10
       TINY_LOG_SESSION_DAYS: 7
-
       TINY_LOG_COOKIE_SECURE: "false"
-
       RUST_LOG: debug
-
     volumes:
       - ./:/app
       - ./data:/data
       - cargo-cache:/usr/local/cargo/registry
       - target-cache:/app/target
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/127.0.0.1/$${TINY_LOG_PORT:-8080} && printf \"GET /health HTTP/1.0\\r\\n\\r\\n\" >&3 && grep -q OK <&3'"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 120s
+
+  tiny-log-agent:
+    image: rust:1.98-bookworm
+    working_dir: /app
+    profiles: ["agent"]
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        export PATH="/usr/local/cargo/bin:$${PATH}"
+        cargo build -p tiny-log-agent
+        exec ./target/debug/tiny-log-agent
+    environment:
+      TINY_LOG_URL: http://tiny-log:8080
+      TINY_LOG_API_KEY: dev-api-key
+      TINY_LOG_HOST_NAME: dev-host
+      TINY_LOG_SYSTEM_INTERVAL_SECS: 60
+      TINY_LOG_SERVICE_INTERVAL_SECS: 120
+      TINY_LOG_DOCKER: "true"
+      TINY_LOG_DOCKER_SOCK: /var/run/docker.sock
+      TINY_LOG_AGENT_CONFIG: /app/agent/agent.example.toml
+      RUST_LOG: info
+    volumes:
+      - ./:/app
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/app/target
+    mem_limit: 64m
+    cpus: 0.25
+    restart: unless-stopped
+    depends_on:
+      tiny-log:
+        condition: service_healthy
 
 volumes:
   cargo-cache:
