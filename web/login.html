@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tiny Log — Login</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <h1>Tiny Log</h1>
+    <form id="login-form" autocomplete="on">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" required autofocus />
+
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" required />
+
+      <p id="login-error" class="error" hidden></p>
+      <button type="submit">Login</button>
+    </form>
+  </main>
+  <script src="/login.js"></script>
+</body>
+</html>
