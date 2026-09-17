@@ -1,0 +1,21 @@
+services:
+  tiny-log-agent:
+    image: tiny-log-agent:latest
+    container_name: tiny-log-agent
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      TINY_LOG_URL: ${TINY_LOG_URL:?set TINY_LOG_URL}
+      TINY_LOG_API_KEY: ${TINY_LOG_API_KEY:?set TINY_LOG_API_KEY}
+      TINY_LOG_HOST_NAME: ${TINY_LOG_HOST_NAME:-}
+      TINY_LOG_SYSTEM_INTERVAL_SECS: ${TINY_LOG_SYSTEM_INTERVAL_SECS:-60}
+      TINY_LOG_SERVICE_INTERVAL_SECS: ${TINY_LOG_SERVICE_INTERVAL_SECS:-120}
+      TINY_LOG_DOCKER: ${TINY_LOG_DOCKER:-true}
+      TINY_LOG_DOCKER_SOCK: /var/run/docker.sock
+      TINY_LOG_DISK_PATH: ${TINY_LOG_DISK_PATH:-/}
+      RUST_LOG: ${RUST_LOG:-warn}
+      TOKIO_WORKER_THREADS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 32m
+    cpus: 0.15

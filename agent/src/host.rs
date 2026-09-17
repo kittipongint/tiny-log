@@ -11,26 +11,55 @@ pub struct SystemSample {
     pub disk_used_bytes: Option<i64>,
     pub disk_total_bytes: Option<i64>,
     pub load1: Option<f64>,
+    pub load5: Option<f64>,
+    pub load15: Option<f64>,
+    pub n_cpus: Option<i64>,
 }
 
 pub async fn sample(cfg: &AgentConfig) -> Result<SystemSample> {
     let (mem_used, mem_total) = memory_bytes().unwrap_or((None, None));
     let (disk_used, disk_total) = disk_bytes(&cfg.disk_path).unwrap_or((None, None));
+    let (load1, load5, load15) = loadavg();
     Ok(SystemSample {
         cpu_pct: cpu_pct().await,
         mem_used_bytes: mem_used,
         mem_total_bytes: mem_total,
         disk_used_bytes: disk_used,
         disk_total_bytes: disk_total,
-        load1: load1(),
+        load1,
+        load5,
+        load15,
+        n_cpus: n_cpus(),
     })
 }
 
-fn load1() -> Option<f64> {
+fn loadavg() -> (Option<f64>, Option<f64>, Option<f64>) {
     #[cfg(target_os = "linux")]
     {
-        let raw = std::fs::read_to_string("/proc/loadavg").ok()?;
-        raw.split_whitespace().next()?.parse().ok()
+        let Ok(raw) = std::fs::read_to_string("/proc/loadavg") else {
+            return (None, None, None);
+        };
+        let mut parts = raw.split_whitespace();
+        let load1 = parts.next().and_then(|s| s.parse().ok());
+        let load5 = parts.next().and_then(|s| s.parse().ok());
+        let load15 = parts.next().and_then(|s| s.parse().ok());
+        (load1, load5, load15)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        (None, None, None)
+    }
+}
+
+fn n_cpus() -> Option<i64> {
+    #[cfg(target_os = "linux")]
+    {
+        let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+        if n > 0 {
+            Some(n as i64)
+        } else {
+            None
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {

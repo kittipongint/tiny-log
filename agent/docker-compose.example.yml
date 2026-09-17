@@ -1,0 +1,75 @@
+# Example: agent monitors labeled services in the same Docker Compose stack.
+# Start with: docker compose -f agent/docker-compose.example.yml up -d
+# Set TINY_LOG_URL / TINY_LOG_API_KEY to your Tiny Log server.
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: example
+      MYSQL_DATABASE: app
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pexample"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      tiny-log.monitor: "true"
+      tiny-log.service: "mysql"
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    labels:
+      tiny-log.monitor: "true"
+      tiny-log.service: "redis"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf http://127.0.0.1:9200/_cluster/health || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    labels:
+      tiny-log.monitor: "true"
+      tiny-log.service: "elasticsearch"
+      tiny-log.health: "http://elasticsearch:9200/_cluster/health"
+      tiny-log.load: "http://elasticsearch:9200/_cluster/health"
+
+  tiny-log-agent:
+    image: tiny-log-agent:latest
+    user: "0:0"
+    environment:
+      TINY_LOG_URL: ${TINY_LOG_URL:?set TINY_LOG_URL}
+      TINY_LOG_API_KEY: ${TINY_LOG_API_KEY:?set TINY_LOG_API_KEY}
+      TINY_LOG_HOST_NAME: ${TINY_LOG_HOST_NAME:-compose-host}
+      TINY_LOG_SYSTEM_INTERVAL_SECS: 60
+      TINY_LOG_SERVICE_INTERVAL_SECS: 120
+      TINY_LOG_DOCKER: "true"
+      TINY_LOG_DOCKER_SOCK: /var/run/docker.sock
+      TINY_LOG_AGENT_CONFIG: /etc/tiny-log/agent.toml
+      RUST_LOG: warn
+      TOKIO_WORKER_THREADS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker.example.toml:/etc/tiny-log/agent.toml:ro
+    mem_limit: 32m
+    cpus: 0.15
+    restart: unless-stopped
+    depends_on:
+      - mysql
+      - redis
+      - elasticsearch

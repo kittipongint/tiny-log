@@ -1,0 +1,3 @@
+ALTER TABLE host_samples ADD COLUMN load5 REAL;
+ALTER TABLE host_samples ADD COLUMN load15 REAL;
+ALTER TABLE host_samples ADD COLUMN n_cpus INTEGER;

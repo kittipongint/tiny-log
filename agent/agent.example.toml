@@ -1,8 +1,28 @@
-# Example agent config
+# Tiny Log agent — example config (copy to agent.toml or set TINY_LOG_AGENT_CONFIG).
+#
+# Required env (not in this file):
+#   TINY_LOG_URL=https://logs.example.com
+#   TINY_LOG_API_KEY=...
+# Optional env:
+#   TINY_LOG_HOST_NAME=web-1
+#   TINY_LOG_SYSTEM_INTERVAL_SECS / TINY_LOG_SERVICE_INTERVAL_SECS
+#   TINY_LOG_DOCKER / TINY_LOG_DOCKER_SOCK / TINY_LOG_DISK_PATH
+#
+# Host samples (system_interval): CPU, mem, disk, load1/5/15, n_cpus
+# → server capacity API recommends ok | watch | scale_out | limit
+#
+# Service checks (service_interval):
+#   http  — alive + latency; ES _cluster/health → load_hint (ok/watch/tight)
+#   tcp   — port alive only
+#   process — alive + /proc CPU/RSS → load_hint + recommend (Linux host agent)
+#   docker labels — container stats + optional health/load URLs (see docker.example.toml)
+
 system_interval_secs = 60
 service_interval_secs = 120
 docker = true
+docker_sock = "/var/run/docker.sock"
 disk_path = "/"
+# host_name = "web-1"
 
 [[service]]
 name = "nginx"
@@ -20,3 +40,38 @@ timeout_ms = 2000
 name = "sshd"
 kind = "process"
 match = "sshd"
+
+# MySQL: tcp = up/down; process = CPU/mem for scale vs limit
+[[service]]
+name = "mysql"
+kind = "tcp"
+addr = "127.0.0.1:3306"
+timeout_ms = 2000
+
+[[service]]
+name = "mysql-daemon"
+kind = "process"
+match = "mysqld"
+
+[[service]]
+name = "redis"
+kind = "tcp"
+addr = "127.0.0.1:6379"
+timeout_ms = 2000
+
+[[service]]
+name = "redis-daemon"
+kind = "process"
+match = "redis-server"
+
+# Elasticsearch: parses cluster status / pending_tasks → load_hint + recommend
+[[service]]
+name = "elasticsearch"
+kind = "http"
+url = "http://127.0.0.1:9200/_cluster/health"
+timeout_ms = 2000
+
+[[service]]
+name = "elasticsearch-daemon"
+kind = "process"
+match = "elasticsearch"

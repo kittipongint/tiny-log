@@ -23,10 +23,45 @@
   <main class="monitor">
     <section>
       <div class="section-head">
-        <h1>Hosts</h1>
+        <h1>Systems</h1>
         <span id="refresh-hint" class="muted">auto-refresh 30s</span>
       </div>
-      <div id="host-cards" class="host-cards"></div>
+      <div class="log-table-wrap">
+        <table class="log-table systems-table">
+          <thead>
+            <tr>
+              <th>System</th>
+              <th>CPU</th>
+              <th>Memory</th>
+              <th>Disk</th>
+              <th>Load</th>
+              <th>Recommend</th>
+            </tr>
+          </thead>
+          <tbody id="host-rows"></tbody>
+        </table>
+      </div>
+      <div id="host-detail" class="host-detail" hidden>
+        <div class="host-detail-head">
+          <h2 id="detail-title"></h2>
+          <p id="detail-meta" class="muted"></p>
+        </div>
+        <div class="spark-grid">
+          <figure class="spark-card">
+            <figcaption>CPU</figcaption>
+            <div id="spark-cpu" class="spark"></div>
+          </figure>
+          <figure class="spark-card">
+            <figcaption>Memory</figcaption>
+            <div id="spark-mem" class="spark"></div>
+          </figure>
+          <figure class="spark-card">
+            <figcaption>Disk</figcaption>
+            <div id="spark-disk" class="spark"></div>
+          </figure>
+        </div>
+        <p id="detail-forecast" class="muted forecast-line"></p>
+      </div>
     </section>
 
     <section>
@@ -37,11 +72,12 @@
             <tr>
               <th>Host</th>
               <th>Service</th>
-              <th>Kind</th>
               <th>Status</th>
+              <th>CPU</th>
+              <th>Memory</th>
+              <th>Load</th>
+              <th>Recommend</th>
               <th>Latency</th>
-              <th>Checked</th>
-              <th>Message</th>
             </tr>
           </thead>
           <tbody id="service-rows"></tbody>

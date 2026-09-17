@@ -27,6 +27,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/metrics/overview", get(metrics::overview))
         .route("/api/v1/metrics/hosts", get(metrics::list_hosts))
         .route("/api/v1/metrics/history", get(metrics::history))
+        .route("/api/v1/metrics/capacity", get(metrics::capacity))
         .route(
             "/api/v1/admin/settings",
             get(admin::get_settings).put(admin::update_settings),

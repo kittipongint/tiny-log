@@ -1,8 +1,15 @@
-const hostCards = document.getElementById("host-cards");
+const hostRows = document.getElementById("host-rows");
 const serviceRows = document.getElementById("service-rows");
+const hostDetail = document.getElementById("host-detail");
+const detailTitle = document.getElementById("detail-title");
+const detailMeta = document.getElementById("detail-meta");
+const detailForecast = document.getElementById("detail-forecast");
 const navUser = document.getElementById("nav-user");
 const navBadge = document.getElementById("nav-badge");
 const logoutBtn = document.getElementById("logout-btn");
+
+let selectedHost = null;
+let hostsCache = [];
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
@@ -33,7 +40,7 @@ function fmtBytes(n) {
 }
 
 function fmtPct(n) {
-  if (n == null) return "—";
+  if (n == null || Number.isNaN(Number(n))) return "—";
   return `${Number(n).toFixed(1)}%`;
 }
 
@@ -45,87 +52,272 @@ function fmtTime(iso) {
   }
 }
 
+function barLevel(pct) {
+  if (pct == null || Number.isNaN(Number(pct))) return "unknown";
+  const v = Number(pct);
+  if (v >= 85) return "hot";
+  if (v >= 70) return "warm";
+  return "ok";
+}
+
+function metricCell(pct) {
+  const wrap = document.createElement("div");
+  wrap.className = "metric-cell";
+  const label = document.createElement("span");
+  label.className = "metric-pct";
+  label.textContent = fmtPct(pct);
+  const track = document.createElement("div");
+  track.className = `metric-bar metric-bar-${barLevel(pct)}`;
+  const fill = document.createElement("span");
+  fill.style.width = `${Math.min(100, Math.max(0, Number(pct) || 0))}%`;
+  track.appendChild(fill);
+  wrap.append(label, track);
+  return wrap;
+}
+
+function badge(kind, value) {
+  const span = document.createElement("span");
+  const v = String(value || "—").toLowerCase();
+  span.className = `badge badge-${kind}-${v.replace(/_/g, "-")}`;
+  span.textContent = String(value || "—").toUpperCase().replace(/_/g, " ");
+  return span;
+}
+
+function forecastLine(f) {
+  if (!f) return "insufficient history";
+  const parts = [];
+  if (f.cpu_pct_1h != null) parts.push(`CPU ~${Number(f.cpu_pct_1h).toFixed(0)}% in 1h`);
+  if (f.mem_pct_1h != null) parts.push(`Mem ~${Number(f.mem_pct_1h).toFixed(0)}% in 1h`);
+  if (f.eta_hours_to_cpu_85 != null) {
+    parts.push(`CPU→85% ~${Number(f.eta_hours_to_cpu_85).toFixed(1)}h`);
+  }
+  if (f.eta_hours_to_mem_85 != null) {
+    parts.push(`Mem→85% ~${Number(f.eta_hours_to_mem_85).toFixed(1)}h`);
+  }
+  return parts.length ? parts.join(" · ") : "insufficient history";
+}
+
+function sparkline(values, color) {
+  const w = 280;
+  const h = 56;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("class", "spark-svg");
+  svg.setAttribute("preserveAspectRatio", "none");
+  if (!values.length) {
+    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    t.setAttribute("x", "8");
+    t.setAttribute("y", "30");
+    t.setAttribute("fill", "currentColor");
+    t.setAttribute("font-size", "11");
+    t.textContent = "no data";
+    svg.appendChild(t);
+    return svg;
+  }
+  const max = Math.max(100, ...values.map((v) => v ?? 0));
+  const min = 0;
+  const n = values.length;
+  const pts = values.map((v, i) => {
+    const x = n === 1 ? 0 : (i / (n - 1)) * w;
+    const y = h - ((Number(v) - min) / (max - min || 1)) * (h - 4) - 2;
+    return [x, y];
+  });
+  const line = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = `${line} L${w},${h} L0,${h} Z`;
+  const a = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  a.setAttribute("d", area);
+  a.setAttribute("fill", color);
+  a.setAttribute("opacity", "0.18");
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", line);
+  p.setAttribute("fill", "none");
+  p.setAttribute("stroke", color);
+  p.setAttribute("stroke-width", "1.5");
+  svg.append(a, p);
+  return svg;
+}
+
 function renderHosts(hosts) {
-  hostCards.replaceChildren();
+  hostsCache = hosts;
+  hostRows.replaceChildren();
   if (!hosts.length) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = "No host samples yet. Start tiny-log-agent on a host.";
-    hostCards.appendChild(empty);
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "muted";
+    td.textContent = "No host samples yet. Start tiny-log-agent on a host.";
+    tr.appendChild(td);
+    hostRows.appendChild(tr);
+    hostDetail.hidden = true;
     return;
   }
   for (const h of hosts) {
-    const card = document.createElement("article");
-    card.className = "host-card";
-    const title = document.createElement("h3");
-    title.textContent = h.host || "";
-    const meta = document.createElement("p");
-    meta.className = "muted";
-    meta.textContent = `Updated ${fmtTime(h.timestamp)}`;
-    const grid = document.createElement("dl");
-    const rows = [
-      ["CPU", fmtPct(h.cpu_pct)],
-      ["Memory", `${fmtBytes(h.mem_used_bytes)} / ${fmtBytes(h.mem_total_bytes)}`],
-      ["Disk", `${fmtBytes(h.disk_used_bytes)} / ${fmtBytes(h.disk_total_bytes)}`],
-      ["Load1", h.load1 == null ? "—" : Number(h.load1).toFixed(2)],
-    ];
-    for (const [k, v] of rows) {
-      const dt = document.createElement("dt");
-      dt.textContent = k;
-      const dd = document.createElement("dd");
-      dd.textContent = v;
-      grid.append(dt, dd);
-    }
-    card.append(title, meta, grid);
-    hostCards.appendChild(card);
+    const tr = document.createElement("tr");
+    tr.className = "systems-row";
+    if (selectedHost === h.host) tr.classList.add("selected");
+    tr.tabIndex = 0;
+    tr.addEventListener("click", () => selectHost(h.host));
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectHost(h.host);
+      }
+    });
+
+    const tdSys = document.createElement("td");
+    const sysWrap = document.createElement("div");
+    sysWrap.className = "system-name";
+    const dot = document.createElement("span");
+    dot.className = `status-dot status-dot-${(h.recommend || "ok").replace(/_/g, "-")}`;
+    const name = document.createElement("span");
+    name.textContent = h.host || "";
+    sysWrap.append(dot, name);
+    tdSys.appendChild(sysWrap);
+
+    const tdCpu = document.createElement("td");
+    tdCpu.appendChild(metricCell(h.cpu_pct));
+    const tdMem = document.createElement("td");
+    tdMem.appendChild(metricCell(h.mem_pct));
+    const tdDisk = document.createElement("td");
+    tdDisk.appendChild(metricCell(h.disk_pct));
+
+    const tdLoad = document.createElement("td");
+    tdLoad.className = "mono";
+    tdLoad.textContent =
+      h.load_per_cpu != null
+        ? Number(h.load_per_cpu).toFixed(2)
+        : h.load1 != null
+          ? Number(h.load1).toFixed(2)
+          : "—";
+
+    const tdRec = document.createElement("td");
+    tdRec.appendChild(badge("rec", h.recommend || "ok"));
+
+    tr.append(tdSys, tdCpu, tdMem, tdDisk, tdLoad, tdRec);
+    hostRows.appendChild(tr);
+  }
+  if (selectedHost && !hosts.some((h) => h.host === selectedHost)) {
+    selectedHost = null;
+    hostDetail.hidden = true;
   }
 }
 
 function renderServices(services) {
   serviceRows.replaceChildren();
-  if (!services.length) {
+  const list = selectedHost
+    ? services.filter((s) => s.host === selectedHost)
+    : services;
+  if (!list.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 7;
+    td.colSpan = 8;
     td.className = "muted";
-    td.textContent = "No service checks yet.";
+    td.textContent = selectedHost
+      ? "No service checks for this host."
+      : "No service checks yet.";
     tr.appendChild(td);
     serviceRows.appendChild(tr);
     return;
   }
-  for (const s of services) {
+  for (const s of list) {
     const tr = document.createElement("tr");
+    if (s.message) tr.title = s.message;
+    const mem =
+      s.mem_used_bytes != null
+        ? `${fmtBytes(s.mem_used_bytes)}${
+            s.mem_limit_bytes != null ? ` / ${fmtBytes(s.mem_limit_bytes)}` : ""
+          }`
+        : "—";
     const cells = [
       s.host,
       s.service,
-      s.kind,
-      s.status,
+      null,
+      fmtPct(s.cpu_pct),
+      mem,
+      null,
+      null,
       s.latency_ms == null ? "—" : `${s.latency_ms} ms`,
-      fmtTime(s.timestamp),
-      s.message || "—",
     ];
     cells.forEach((text, idx) => {
       const td = document.createElement("td");
-      if (idx === 3) {
-        const span = document.createElement("span");
-        span.className = `status status-${String(s.status || "").toLowerCase()}`;
-        span.textContent = String(s.status || "").toUpperCase();
-        td.appendChild(span);
-      } else {
-        td.textContent = text;
-      }
+      if (idx === 2) td.appendChild(badge("status", s.status));
+      else if (idx === 5) td.appendChild(badge("load", s.load_hint || "—"));
+      else if (idx === 6) td.appendChild(badge("rec", s.recommend || "—"));
+      else td.textContent = text;
       tr.appendChild(td);
     });
     serviceRows.appendChild(tr);
   }
 }
 
+async function selectHost(host) {
+  selectedHost = host;
+  for (const row of hostRows.querySelectorAll(".systems-row")) {
+    row.classList.toggle(
+      "selected",
+      row.querySelector(".system-name span:last-child")?.textContent === host
+    );
+  }
+  const h = hostsCache.find((x) => x.host === host);
+  hostDetail.hidden = false;
+  detailTitle.textContent = host;
+  detailMeta.textContent = h
+    ? `Updated ${fmtTime(h.timestamp)} · headroom ${fmtPct(h.headroom_pct)}`
+    : "";
+  detailForecast.textContent = "Loading…";
+  document.getElementById("spark-cpu").replaceChildren();
+  document.getElementById("spark-mem").replaceChildren();
+  document.getElementById("spark-disk").replaceChildren();
+
+  const [histRes, capRes] = await Promise.all([
+    api(
+      `/api/v1/metrics/history?kind=host&host=${encodeURIComponent(host)}&limit=60`
+    ),
+    api(`/api/v1/metrics/capacity?host=${encodeURIComponent(host)}`),
+  ]);
+
+  if (histRes.ok) {
+    const hist = await histRes.json();
+    const samples = (hist.samples || []).slice().reverse();
+    const cpu = samples.map((s) => s.cpu_pct ?? 0);
+    const mem = samples.map((s) => {
+      if (s.mem_used_bytes != null && s.mem_total_bytes) {
+        return (s.mem_used_bytes / s.mem_total_bytes) * 100;
+      }
+      return 0;
+    });
+    const disk = samples.map((s) => {
+      if (s.disk_used_bytes != null && s.disk_total_bytes) {
+        return (s.disk_used_bytes / s.disk_total_bytes) * 100;
+      }
+      return 0;
+    });
+    document.getElementById("spark-cpu").appendChild(sparkline(cpu, "#3d9cf0"));
+    document.getElementById("spark-mem").appendChild(sparkline(mem, "#3ecf8e"));
+    document.getElementById("spark-disk").appendChild(sparkline(disk, "#e0a100"));
+  }
+
+  if (capRes.ok) {
+    const cap = await capRes.json();
+    detailForecast.textContent = forecastLine(cap.forecast);
+  } else {
+    detailForecast.textContent = "insufficient history";
+  }
+
+  const overview = window.__monitorServices || [];
+  renderServices(overview);
+}
+
 async function loadOverview() {
   const res = await api("/api/v1/metrics/overview");
   if (!res.ok) throw new Error("overview");
   const data = await res.json();
+  window.__monitorServices = data.services || [];
   renderHosts(data.hosts || []);
-  renderServices(data.services || []);
+  renderServices(window.__monitorServices);
+  if (selectedHost) {
+    await selectHost(selectedHost);
+  }
 }
 
 logoutBtn.addEventListener("click", async () => {

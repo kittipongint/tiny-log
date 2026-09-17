@@ -1,0 +1,43 @@
+# Bare-metal / systemd agent (run on the host, not in a container).
+# Env: TINY_LOG_URL, TINY_LOG_API_KEY, optional TINY_LOG_HOST_NAME.
+#
+# process checks need Linux /proc (CPU + RSS → load_hint / recommend).
+# elasticsearch http URL parses _cluster/health for tight load / limit hints.
+
+system_interval_secs = 60
+service_interval_secs = 120
+docker = false
+disk_path = "/"
+
+[[service]]
+name = "mysql"
+kind = "tcp"
+addr = "127.0.0.1:3306"
+timeout_ms = 2000
+
+[[service]]
+name = "mysql-daemon"
+kind = "process"
+match = "mysqld"
+
+[[service]]
+name = "redis"
+kind = "tcp"
+addr = "127.0.0.1:6379"
+timeout_ms = 2000
+
+[[service]]
+name = "redis-daemon"
+kind = "process"
+match = "redis-server"
+
+[[service]]
+name = "elasticsearch"
+kind = "http"
+url = "http://127.0.0.1:9200/_cluster/health"
+timeout_ms = 2000
+
+[[service]]
+name = "elasticsearch-daemon"
+kind = "process"
+match = "elasticsearch"

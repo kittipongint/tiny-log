@@ -2,7 +2,7 @@ use crate::auth::middleware::require_api_key;
 use crate::auth::AuthUser;
 use crate::db;
 use crate::error::{AppError, AppResult};
-use crate::models::metrics::{MetricsBatchRequest, MetricsHistoryQuery};
+use crate::models::metrics::{CapacityQuery, MetricsBatchRequest, MetricsHistoryQuery};
 use crate::state::AppState;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
@@ -48,6 +48,7 @@ pub async fn overview(
     _user: AuthUser,
 ) -> AppResult<Json<Value>> {
     let hosts = db::metrics::latest_host_samples(&state.metrics_db).await?;
+    let hosts: Vec<_> = hosts.into_iter().map(|h| h.into_overview()).collect();
     let services = db::metrics::latest_service_checks(&state.metrics_db).await?;
     Ok(Json(json!({
         "hosts": hosts,
@@ -91,4 +92,13 @@ pub async fn history(
         }
         _ => Err(AppError::bad_request("kind must be host or service")),
     }
+}
+
+pub async fn capacity(
+    State(state): State<AppState>,
+    _user: AuthUser,
+    Query(query): Query<CapacityQuery>,
+) -> AppResult<Json<Value>> {
+    let cap = db::metrics::host_capacity(&state.metrics_db, &query.host).await?;
+    Ok(Json(json!(cap)))
 }

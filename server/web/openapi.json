@@ -88,7 +88,10 @@
               "mem_total_bytes": { "type": "integer", "example": 4294967296 },
               "disk_used_bytes": { "type": "integer", "example": 50000000000 },
               "disk_total_bytes": { "type": "integer", "example": 100000000000 },
-              "load1": { "type": "number", "example": 0.4 }
+              "load1": { "type": "number", "example": 0.4 },
+              "load5": { "type": "number", "example": 0.5 },
+              "load15": { "type": "number", "example": 0.6 },
+              "n_cpus": { "type": "integer", "example": 4 }
             }
           },
           "services": {
@@ -111,7 +114,18 @@
                 },
                 "latency_ms": { "type": "integer", "example": 18 },
                 "message": { "type": "string", "example": "200" },
-                "meta": { "type": "object", "additionalProperties": true }
+                "meta": { "type": "object", "additionalProperties": true },
+                "cpu_pct": { "type": "number" },
+                "mem_used_bytes": { "type": "integer" },
+                "mem_limit_bytes": { "type": "integer" },
+                "load_hint": {
+                  "type": "string",
+                  "enum": ["ok", "watch", "tight"]
+                },
+                "recommend": {
+                  "type": "string",
+                  "enum": ["ok", "watch", "scale_out", "limit"]
+                }
               }
             }
           }
@@ -448,6 +462,25 @@
           }
         ],
         "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/v1/metrics/capacity": {
+      "get": {
+        "tags": ["metrics"],
+        "summary": "Host capacity, headroom, scale recommend, and short forecast",
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "host",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "OK" },
+          "404": { "description": "Host not found" }
+        }
       }
     }
   }

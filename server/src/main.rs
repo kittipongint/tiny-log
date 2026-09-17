@@ -12,7 +12,7 @@ mod web;
 use clap::Parser;
 use cli::Cli;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(

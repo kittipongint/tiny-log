@@ -2,13 +2,14 @@ mod checks;
 mod config;
 mod docker;
 mod host;
+mod load;
 mod push;
 
 use crate::config::AgentConfig;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(

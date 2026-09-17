@@ -1,0 +1,18 @@
+# Docker / Compose agent: discover services via container labels (no [[service]] needed).
+# Mount docker.sock read-only. Env: TINY_LOG_URL, TINY_LOG_API_KEY.
+#
+# Labels on each monitored container:
+#   tiny-log.monitor = true              (required)
+#   tiny-log.service = mysql             (optional display name)
+#   tiny-log.health  = http://svc:port/… (optional HTTP alive check)
+#   tiny-log.load    = http://es:9200/_cluster/health
+#        optional load probe (ES health → load_hint ok|watch|tight)
+#
+# Running containers also get one-shot Docker stats (CPU / memory) for recommend.
+# Full stack example: docker-compose.example.yml
+
+system_interval_secs = 60
+service_interval_secs = 120
+docker = true
+docker_sock = "/var/run/docker.sock"
+disk_path = "/"
