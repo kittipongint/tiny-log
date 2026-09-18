@@ -1,8 +1,8 @@
 [package]
 name = "tiny-log"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.85"
 
 [[bin]]
 name = "tiny-log"

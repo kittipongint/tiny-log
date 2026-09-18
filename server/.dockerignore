@@ -3,6 +3,7 @@ target
 .gitignore
 data
 *.md
+*.db
+*.db-*
 .dockerignore
 docker-compose*.yml
-scripts

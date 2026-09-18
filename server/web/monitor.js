@@ -222,30 +222,38 @@ function renderServices(services) {
   for (const s of list) {
     const tr = document.createElement("tr");
     if (s.message) tr.title = s.message;
-    const mem =
-      s.mem_used_bytes != null
-        ? `${fmtBytes(s.mem_used_bytes)}${
-            s.mem_limit_bytes != null ? ` / ${fmtBytes(s.mem_limit_bytes)}` : ""
-          }`
-        : "—";
-    const cells = [
-      s.host,
-      s.service,
-      null,
-      fmtPct(s.cpu_pct),
-      mem,
-      null,
-      null,
-      s.latency_ms == null ? "—" : `${s.latency_ms} ms`,
-    ];
-    cells.forEach((text, idx) => {
-      const td = document.createElement("td");
-      if (idx === 2) td.appendChild(badge("status", s.status));
-      else if (idx === 5) td.appendChild(badge("load", s.load_hint || "—"));
-      else if (idx === 6) td.appendChild(badge("rec", s.recommend || "—"));
-      else td.textContent = text;
-      tr.appendChild(td);
-    });
+    const memPct =
+      s.mem_used_bytes != null && s.mem_limit_bytes
+        ? (s.mem_used_bytes / s.mem_limit_bytes) * 100
+        : null;
+
+    const tdHost = document.createElement("td");
+    tdHost.textContent = s.host;
+    const tdSvc = document.createElement("td");
+    tdSvc.textContent = s.service;
+    const tdStatus = document.createElement("td");
+    tdStatus.appendChild(badge("status", s.status));
+    const tdCpu = document.createElement("td");
+    tdCpu.appendChild(metricCell(s.cpu_pct));
+    const tdMem = document.createElement("td");
+    if (memPct != null) {
+      const cell = metricCell(memPct);
+      cell.title = `${fmtBytes(s.mem_used_bytes)} / ${fmtBytes(s.mem_limit_bytes)}`;
+      tdMem.appendChild(cell);
+    } else if (s.mem_used_bytes != null) {
+      tdMem.className = "mono";
+      tdMem.textContent = fmtBytes(s.mem_used_bytes);
+    } else {
+      tdMem.textContent = "—";
+    }
+    const tdLoad = document.createElement("td");
+    tdLoad.appendChild(badge("load", s.load_hint || "—"));
+    const tdRec = document.createElement("td");
+    tdRec.appendChild(badge("rec", s.recommend || "—"));
+    const tdLat = document.createElement("td");
+    tdLat.textContent = s.latency_ms == null ? "—" : `${s.latency_ms} ms`;
+
+    tr.append(tdHost, tdSvc, tdStatus, tdCpu, tdMem, tdLoad, tdRec, tdLat);
     serviceRows.appendChild(tr);
   }
 }
@@ -310,7 +318,26 @@ async function selectHost(host) {
 
 async function loadOverview() {
   const res = await api("/api/v1/metrics/overview");
-  if (!res.ok) throw new Error("overview");
+  if (!res.ok) {
+    const msg =
+      res.status === 401
+        ? null
+        : `Metrics API error (${res.status}). Check metrics.db / server logs.`;
+    if (msg) {
+      hostRows.replaceChildren();
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 6;
+      td.className = "muted";
+      td.textContent = msg;
+      tr.appendChild(td);
+      hostRows.appendChild(tr);
+      hostDetail.hidden = true;
+      serviceRows.replaceChildren();
+      return;
+    }
+    throw new Error("unauthorized");
+  }
   const data = await res.json();
   window.__monitorServices = data.services || [];
   renderHosts(data.hosts || []);
@@ -329,15 +356,14 @@ async function boot() {
   const me = await api("/api/auth/me");
   if (!me.ok) return;
   const data = await me.json();
-  if (data.setup_required) {
-    window.location.href = "/setup";
-    return;
-  }
   navUser.textContent = data.username || "";
   if (data.auth_mode === "anonymous") {
     navBadge.hidden = false;
     navBadge.textContent = "anonymous";
     logoutBtn.hidden = true;
+  } else if (data.setup_required) {
+    window.location.href = "/setup";
+    return;
   }
   await loadOverview();
   setInterval(() => {

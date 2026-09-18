@@ -5,10 +5,9 @@ RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
-COPY server ./server
-COPY agent ./agent
+COPY src ./src
 
-RUN cargo build --release -p tiny-log-agent
+RUN cargo build --release
 
 FROM alpine:3.21
 

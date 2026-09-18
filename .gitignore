@@ -1,6 +1,11 @@
+/server/target/
+/agent/target/
 /target/
 /data/
 *.db
 *.db-*
 .env
+server/.env
+agent/.env
 .DS_Store
+/dist/

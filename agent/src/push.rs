@@ -16,6 +16,7 @@ impl PushClient {
     pub fn new(cfg: Arc<AgentConfig>) -> Self {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
+            .pool_max_idle_per_host(2)
             .build()
             .expect("http client");
         Self { cfg, http }
@@ -28,7 +29,7 @@ impl PushClient {
             system: Some(system),
             services: Vec::new(),
         };
-        self.post(body).await
+        self.post_with_retry(body).await
     }
 
     pub async fn send_services(&self, services: Vec<ServiceCheckResult>) -> Result<()> {
@@ -38,25 +39,49 @@ impl PushClient {
             system: None,
             services,
         };
-        self.post(body).await
+        self.post_with_retry(body).await
     }
 
-    async fn post(&self, body: MetricsBatch) -> Result<()> {
+    async fn post_with_retry(&self, body: MetricsBatch) -> Result<()> {
+        let mut last_err = None;
+        for attempt in 0..3u32 {
+            match self.post(&body).await {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    let msg = err.to_string();
+                    if msg.contains("push rejected") {
+                        return Err(err);
+                    }
+                    last_err = Some(err);
+                    if attempt < 2 {
+                        let backoff = Duration::from_millis(200 * 2u64.pow(attempt));
+                        tokio::time::sleep(backoff).await;
+                    }
+                }
+            }
+        }
+        Err(last_err.expect("retry loop"))
+    }
+
+    async fn post(&self, body: &MetricsBatch) -> Result<()> {
         let url = format!("{}/api/v1/metrics/batch", self.cfg.url);
         let res = self
             .http
-            .post(url)
+            .post(&url)
             .bearer_auth(&self.cfg.api_key)
-            .json(&body)
+            .json(body)
             .send()
             .await
-            .context("metrics push request")?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = res.text().await.unwrap_or_default();
-            anyhow::bail!("metrics push failed: {status} {text}");
+            .with_context(|| format!("metrics push request to {url}"))?;
+        if res.status().is_success() {
+            return Ok(());
         }
-        Ok(())
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        if matches!(status.as_u16(), 400 | 401 | 403 | 413) {
+            anyhow::bail!("metrics push rejected: {status} {text}");
+        }
+        anyhow::bail!("metrics push failed: {status} {text}");
     }
 }
 

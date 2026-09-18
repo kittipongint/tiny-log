@@ -1,11 +1,15 @@
 services:
   tiny-log-agent:
-    image: tiny-log-agent:latest
+    image: kittipongint/kintstudio:tiny-log-agent-1.0.0
     container_name: tiny-log-agent
     restart: unless-stopped
+    stop_grace_period: 15s
+    # Required when TINY_LOG_URL uses 127.0.0.1 (server also network_mode: host).
+    network_mode: host
     user: "0:0"
     environment:
-      TINY_LOG_URL: ${TINY_LOG_URL:?set TINY_LOG_URL}
+      # Same machine as server → 127.0.0.1:PORT. Different VM → http://server-ip:3006
+      TINY_LOG_URL: ${TINY_LOG_URL:-http://127.0.0.1:3006}
       TINY_LOG_API_KEY: ${TINY_LOG_API_KEY:?set TINY_LOG_API_KEY}
       TINY_LOG_HOST_NAME: ${TINY_LOG_HOST_NAME:-}
       TINY_LOG_SYSTEM_INTERVAL_SECS: ${TINY_LOG_SYSTEM_INTERVAL_SECS:-60}
@@ -13,9 +17,14 @@ services:
       TINY_LOG_DOCKER: ${TINY_LOG_DOCKER:-true}
       TINY_LOG_DOCKER_SOCK: /var/run/docker.sock
       TINY_LOG_DISK_PATH: ${TINY_LOG_DISK_PATH:-/}
-      RUST_LOG: ${RUST_LOG:-warn}
+      RUST_LOG: ${RUST_LOG:-info}
       TOKIO_WORKER_THREADS: "1"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     mem_limit: 32m
     cpus: 0.15
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"

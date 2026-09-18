@@ -124,7 +124,7 @@ pub fn require_api_key(state: &AppState, headers: &axum::http::HeaderMap) -> App
         .as_ref()
         .ok_or(AppError::Unauthorized)?;
     let provided = extract_bearer(headers).ok_or(AppError::Unauthorized)?;
-    if provided != *configured {
+    if !constant_time_eq(provided.as_bytes(), configured.as_bytes()) {
         return Err(AppError::Unauthorized);
     }
     Ok(())
@@ -137,8 +137,18 @@ pub fn require_client_token(state: &AppState, headers: &axum::http::HeaderMap) -
         .as_ref()
         .ok_or(AppError::Unauthorized)?;
     let provided = extract_bearer(headers).ok_or(AppError::Unauthorized)?;
-    if provided != *configured {
+    if !constant_time_eq(provided.as_bytes(), configured.as_bytes()) {
         return Err(AppError::Unauthorized);
     }
     Ok(())
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }

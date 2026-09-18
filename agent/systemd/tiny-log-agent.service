@@ -1,0 +1,23 @@
+[Unit]
+Description=Tiny Log agent (host metrics + service checks)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tiny-log-agent
+Group=tiny-log-agent
+EnvironmentFile=-/etc/tiny-log/agent.env
+Environment=TINY_LOG_AGENT_CONFIG=/etc/tiny-log/agent.toml
+ExecStart=/usr/local/bin/tiny-log-agent
+Restart=always
+RestartSec=5
+# Host metrics need /proc; process checks use /proc too.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -23,20 +23,23 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(config: Config) -> anyhow::Result<Self> {
-        ensure_parent_dir(&config.logs_database).await?;
-        ensure_parent_dir(&config.system_database).await?;
-        ensure_parent_dir(&config.metrics_database).await?;
+        ensure_db_path(&config.logs_database).await?;
+        ensure_db_path(&config.system_database).await?;
+        ensure_db_path(&config.metrics_database).await?;
 
-        let logs_db = connect_pool(&config.logs_database_url(), 5).await?;
-        let system_db = connect_pool(&config.system_database_url(), 2).await?;
-        let metrics_db = connect_pool(&config.metrics_database_url(), 2).await?;
+        let logs_db = connect_pool(&config.logs_database_url(), 5)
+            .await
+            .map_err(|e| db_open_err("logs", &config.logs_database, e))?;
+        let system_db = connect_pool(&config.system_database_url(), 2)
+            .await
+            .map_err(|e| db_open_err("system", &config.system_database, e))?;
+        let metrics_db = connect_pool(&config.metrics_database_url(), 2)
+            .await
+            .map_err(|e| db_open_err("metrics", &config.metrics_database, e))?;
 
-        sqlx::query("PRAGMA auto_vacuum = INCREMENTAL;")
-            .execute(&logs_db)
-            .await?;
-        sqlx::query("PRAGMA auto_vacuum = INCREMENTAL;")
-            .execute(&metrics_db)
-            .await?;
+        harden_pool(&logs_db, "logs").await?;
+        harden_pool(&system_db, "system").await?;
+        harden_pool(&metrics_db, "metrics").await?;
 
         let (broadcaster, _) = broadcast::channel(1024);
 
@@ -68,10 +71,6 @@ impl AppState {
             .run(&self.metrics_db)
             .await?;
 
-        let _ = sqlx::query("ALTER TABLE logs DROP COLUMN created_at;")
-            .execute(&self.logs_db)
-            .await;
-
         crate::db::settings::ensure_defaults(
             &self.system_db,
             self.config.retention_days,
@@ -83,13 +82,41 @@ impl AppState {
     }
 }
 
-async fn ensure_parent_dir(path: &Path) -> anyhow::Result<()> {
+async fn ensure_db_path(path: &Path) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            tokio::fs::create_dir_all(parent).await?;
+            tokio::fs::create_dir_all(parent).await.map_err(|err| {
+                anyhow::anyhow!(
+                    "cannot create database directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+
+            // Probe writability early — SQLite code 14 is otherwise opaque.
+            let probe = parent.join(".tiny-log-write-test");
+            match tokio::fs::write(&probe, b"ok").await {
+                Ok(()) => {
+                    let _ = tokio::fs::remove_file(&probe).await;
+                }
+                Err(err) => {
+                    anyhow::bail!(
+                        "cannot write to {} ({err}). \
+                         If using Docker, ensure the volume is writable by uid 10001 \
+                         (entrypoint should chown /data automatically).",
+                        parent.display()
+                    );
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn db_open_err(name: &str, path: &Path, err: anyhow::Error) -> anyhow::Error {
+    anyhow::anyhow!(
+        "unable to open {name} database at {}: {err}",
+        path.display()
+    )
 }
 
 async fn connect_pool(url: &str, max_connections: u32) -> anyhow::Result<SqlitePool> {
@@ -97,14 +124,66 @@ async fn connect_pool(url: &str, max_connections: u32) -> anyhow::Result<SqliteP
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
-        .busy_timeout(Duration::from_millis(5000))
+        .busy_timeout(Duration::from_secs(10))
         .foreign_keys(true);
 
     Ok(SqlitePoolOptions::new()
         .max_connections(max_connections)
         .min_connections(1)
+        .acquire_timeout(Duration::from_secs(15))
+        .idle_timeout(Some(Duration::from_secs(600)))
         .connect_with(options)
         .await?)
+}
+
+/// Production SQLite defaults: cap WAL growth, keep temp off disk, fail fast on corruption.
+async fn harden_pool(pool: &SqlitePool, name: &str) -> anyhow::Result<()> {
+    sqlx::query("PRAGMA temp_store = MEMORY;")
+        .execute(pool)
+        .await?;
+    // 64 MiB WAL cap after checkpoint reset
+    sqlx::query("PRAGMA journal_size_limit = 67108864;")
+        .execute(pool)
+        .await?;
+    // ~20 MiB page cache (negative = KiB)
+    sqlx::query("PRAGMA cache_size = -20000;")
+        .execute(pool)
+        .await?;
+    sqlx::query("PRAGMA auto_vacuum = INCREMENTAL;")
+        .execute(pool)
+        .await?;
+    sqlx::query("PRAGMA wal_autocheckpoint = 1000;")
+        .execute(pool)
+        .await?;
+
+    let check: String = sqlx::query_scalar("PRAGMA quick_check;")
+        .fetch_one(pool)
+        .await?;
+    if check != "ok" {
+        anyhow::bail!("{name} database failed quick_check: {check}");
+    }
+    tracing::info!(db = name, "sqlite_ready");
+    Ok(())
+}
+
+pub async fn checkpoint_all(
+    logs_db: &SqlitePool,
+    system_db: &SqlitePool,
+    metrics_db: &SqlitePool,
+) {
+    for (name, pool) in [
+        ("logs", logs_db),
+        ("system", system_db),
+        ("metrics", metrics_db),
+    ] {
+        match sqlx::query("PRAGMA wal_checkpoint(PASSIVE);")
+            .execute(pool)
+            .await
+        {
+            Ok(_) => {}
+            Err(err) => tracing::warn!(db = name, error = %err, "wal_checkpoint_failed"),
+        }
+    }
 }
 
 /// If an older single-file DB still holds auth tables, copy them into system.db

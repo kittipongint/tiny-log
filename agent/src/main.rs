@@ -46,7 +46,7 @@ async fn main() {
             match host::sample(&system_cfg).await {
                 Ok(sample) => {
                     if let Err(err) = system_push.send_system(sample).await {
-                        warn!(error = %err, "system_push_failed");
+                        warn!(error = format!("{err:#}"), "system_push_failed");
                     }
                 }
                 Err(err) => warn!(error = %err, "system_sample_failed"),
@@ -80,7 +80,7 @@ async fn main() {
             }
 
             if let Err(err) = service_push.send_services(services).await {
-                warn!(error = %err, "service_push_failed");
+                warn!(error = format!("{err:#}"), "service_push_failed");
             }
         }
     });
@@ -96,5 +96,31 @@ async fn main() {
                 error!(error = %err, "service_task_crashed");
             }
         }
+        _ = shutdown_signal() => {
+            info!("agent_shutdown");
+        }
+    }
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut sig) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            sig.recv().await;
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
     }
 }

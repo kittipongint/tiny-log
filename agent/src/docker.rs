@@ -138,10 +138,15 @@ async fn check_container(sock: &Path, c: DockerContainer) -> Option<ServiceCheck
     }
 
     if running {
-        if let Ok(stats) = container_stats(sock, &c.id).await {
-            result.cpu_pct = stats.cpu_pct;
-            result.mem_used_bytes = stats.mem_used_bytes;
-            result.mem_limit_bytes = stats.mem_limit_bytes;
+        match container_stats(sock, &c.id).await {
+            Ok(stats) => {
+                result.cpu_pct = stats.cpu_pct;
+                result.mem_used_bytes = stats.mem_used_bytes;
+                result.mem_limit_bytes = stats.mem_limit_bytes;
+            }
+            Err(err) => {
+                tracing::warn!(container = %c.id, error = %err, "docker_stats_failed");
+            }
         }
     }
 
@@ -202,6 +207,9 @@ struct MemoryStats {
 }
 
 async fn container_stats(sock: &Path, id: &str) -> Result<ContainerResources> {
+    // One-shot stats often have empty precpu_stats; sample twice for a real CPU delta.
+    let _ = docker_get(sock, &format!("/containers/{id}/stats?stream=false")).await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
     let body = docker_get(sock, &format!("/containers/{id}/stats?stream=false")).await?;
     let stats: DockerStats = serde_json::from_slice(&body).context("parse docker stats")?;
 
@@ -244,6 +252,7 @@ async fn container_stats(sock: &Path, id: &str) -> Result<ContainerResources> {
         .memory_stats
         .as_ref()
         .and_then(|m| m.limit)
+        .filter(|l| *l > 0)
         .map(|u| u as i64);
 
     Ok(ContainerResources {

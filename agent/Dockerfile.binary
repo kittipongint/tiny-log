@@ -1,0 +1,12 @@
+# Build glibc agent binary for bare-metal Debian/Ubuntu (not Alpine/musl).
+FROM rust:1.98-bookworm AS builder
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+RUN cargo build --release \
+ && strip target/release/tiny-log-agent
+
+FROM scratch AS export
+COPY --from=builder /app/target/release/tiny-log-agent /tiny-log-agent

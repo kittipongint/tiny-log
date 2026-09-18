@@ -133,8 +133,8 @@ pub async fn me(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json
 
     Ok(Json(json!({
         "auth_mode": state.config.auth_mode.as_str(),
-        "authenticated": authenticated || (state.config.is_anonymous() && !setup_required),
-        "setup_required": setup_required,
+        "authenticated": authenticated || state.config.is_anonymous(),
+        "setup_required": setup_required && !state.config.is_anonymous(),
         "username": session_user.as_ref().and_then(|u| u.username()).or_else(|| admin.as_ref().map(|a| a.username.as_str())),
         "role": if authenticated || state.config.is_anonymous() { Some("admin") } else { None },
     })))

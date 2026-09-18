@@ -1,0 +1,58 @@
+services:
+  tiny-log:
+    image: kittipongint/kintstudio:tiny-log-1.0.0
+    container_name: tiny-log
+    restart: unless-stopped
+    stop_grace_period: 30s
+    network_mode: host
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TINY_LOG_HOST: 0.0.0.0
+      TINY_LOG_PORT: ${TINY_LOG_PORT:-3006}
+      TINY_LOG_DATA_DIR: /data
+      TINY_LOG_LOGS_DATABASE: /data/logs.db
+      TINY_LOG_SYSTEM_DATABASE: /data/system.db
+      TINY_LOG_METRICS_DATABASE: /data/metrics.db
+      TINY_LOG_WEB_DIR: /app/web
+      TINY_LOG_API_KEY: ${TINY_LOG_API_KEY:?set TINY_LOG_API_KEY}
+      TINY_LOG_CLIENT_TOKEN: ${TINY_LOG_CLIENT_TOKEN:?set TINY_LOG_CLIENT_TOKEN}
+      TINY_LOG_AUTH_MODE: ${TINY_LOG_AUTH_MODE:-anonymous}
+      TINY_LOG_RETENTION_DAYS: ${TINY_LOG_RETENTION_DAYS:-30}
+      TINY_LOG_SESSION_DAYS: ${TINY_LOG_SESSION_DAYS:-7}
+      TINY_LOG_COOKIE_SECURE: ${TINY_LOG_COOKIE_SECURE:-false}
+      RUST_LOG: ${RUST_LOG:-info}
+      TOKIO_WORKER_THREADS: "1"
+    volumes:
+      # Linux host path is fine. Entrypoint chowns to uid 10001 on start.
+      - ${TINY_LOG_DATA_PATH:-./tiny-log-data}:/data
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    # Do NOT use no-new-privileges — it breaks su-exec/setgroups.
+    # Do NOT set user: — entrypoint must start as root to fix /data ownership.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    mem_limit: 128m
+    cpus: 0.50
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O - http://127.0.0.1:$${TINY_LOG_PORT}/ready"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

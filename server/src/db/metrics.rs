@@ -18,8 +18,28 @@ pub async fn insert_batch(
         return Err(AppError::PayloadTooLarge);
     }
 
-    let mut tx = pool.begin().await?;
+    let mut conn = pool.acquire().await?;
+    // Write lock first so busy_timeout applies instead of mid-tx SQLITE_BUSY.
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
 
+    if let Err(err) =
+        insert_batch_tx(&mut conn, host, timestamp_ms, system, services).await
+    {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+        return Err(err);
+    }
+
+    sqlx::query("COMMIT").execute(&mut *conn).await?;
+    Ok(())
+}
+
+async fn insert_batch_tx(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    host: &str,
+    timestamp_ms: i64,
+    system: Option<&HostSampleInput>,
+    services: &[ServiceCheckInput],
+) -> AppResult<()> {
     if let Some(sys) = system {
         sqlx::query(
             r#"
@@ -40,7 +60,7 @@ pub async fn insert_batch(
         .bind(sys.load5)
         .bind(sys.load15)
         .bind(sys.n_cpus)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
     }
 
@@ -84,11 +104,9 @@ pub async fn insert_batch(
         .bind(svc.mem_limit_bytes)
         .bind(load_hint)
         .bind(recommend)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
     }
-
-    tx.commit().await?;
     Ok(())
 }
 

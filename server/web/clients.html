@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tiny Log — Client helpers</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .doc { max-width: 960px; margin: 0 auto; padding: 1.25rem 1.5rem 3rem; }
+    .doc h1 { font-size: 1.6rem; margin: 0 0 0.35rem; letter-spacing: -0.02em; }
+    .doc .lede { color: var(--muted); margin: 0 0 1.25rem; line-height: 1.5; max-width: 42rem; }
+    .doc h2 { font-size: 1.15rem; margin: 1.75rem 0 0.65rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
+    .doc h3 { font-size: 0.95rem; margin: 1.25rem 0 0.5rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .doc p, .doc li { line-height: 1.55; }
+    .doc ul { padding-left: 1.2rem; }
+    .doc code { font-family: var(--mono); font-size: 0.86em; background: var(--bg-row); padding: 0.1em 0.35em; border-radius: 4px; }
+    .callout { border: 1px solid var(--border); background: var(--bg-elevated); border-radius: 8px; padding: 0.85rem 1rem; margin: 1rem 0; font-size: 0.92rem; line-height: 1.5; }
+    .callout strong { color: var(--warn); }
+    .tabs { display: flex; gap: 0.35rem; flex-wrap: wrap; margin: 1rem 0 0.75rem; }
+    .tabs button { background: var(--bg-row); border: 1px solid var(--border); border-radius: 999px; padding: 0.4rem 0.9rem; cursor: pointer; }
+    .tabs button.active { border-color: var(--accent); background: #1a2c3d; color: var(--accent); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .code-wrap { position: relative; margin: 0.5rem 0 1rem; border: 1px solid var(--border); border-radius: 8px; background: #0c1016; overflow: hidden; }
+    .code-wrap header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.45rem 0.75rem; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; font-family: var(--mono); }
+    .code-wrap button.copy { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 0.2rem 0.55rem; cursor: pointer; color: var(--muted); font-size: 0.75rem; }
+    .code-wrap button.copy:hover { color: var(--text); border-color: var(--accent); }
+    .code-wrap pre { margin: 0; padding: 0.9rem 1rem; overflow: auto; max-height: 28rem; font-family: var(--mono); font-size: 0.78rem; line-height: 1.45; color: #d7e2ee; white-space: pre; }
+    .code-wrap pre.loading { color: var(--muted); }
+    .pill { display: inline-block; border-radius: 999px; padding: 0.15rem 0.55rem; font-size: 0.75rem; border: 1px solid var(--border); margin-right: 0.25rem; }
+    .pill.sending { color: var(--info); border-color: #2a5a7a; }
+    .pill.ok { color: var(--ok); border-color: #2a6b4a; }
+    .pill.fail { color: var(--error); border-color: #7a2a35; }
+    .pill.idle { color: var(--muted); }
+    .live { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 1rem 0; padding: 0.85rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); }
+    .live button { background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 8px; padding: 0.45rem 0.9rem; cursor: pointer; }
+    .live #live-result { font-family: var(--mono); font-size: 0.85rem; color: var(--muted); }
+    .live #live-result.ok { color: var(--ok); }
+    .live #live-result.fail { color: var(--error); }
+    .links a { margin-right: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Tiny Log</div>
+    <nav>
+      <a href="/">Logs</a>
+      <a href="/monitor">Monitor</a>
+      <a href="/swagger">API</a>
+      <a href="/clients" class="active">Clients</a>
+      <a href="/settings">Settings</a>
+    </nav>
+  </header>
+
+  <main class="doc">
+    <h1>Client helpers</h1>
+    <p class="lede">
+      Ready-to-use sink helpers. Server apps use API key on
+      <code>POST /api/v1/logs</code> / <code>/batch</code>.
+      Browsers use client token on <code>POST /api/v1/client/logs</code>.
+    </p>
+
+    <div class="callout">
+      <strong>Note:</strong> <code>tiny-log-agent</code> ships host/service metrics only.
+      Application logs always go over HTTP with these helpers.
+    </div>
+
+    <p class="links">
+      Source files:
+      <a href="/tinylog.go">tinylog.go</a>
+      <a href="/tinylog.mjs">tinylog.mjs</a>
+      <a href="/tinylog.js">tinylog.js</a>
+    </p>
+
+    <h2>Contract</h2>
+    <ul>
+      <li>Levels: <code>debug</code> <code>info</code> <code>warn</code> <code>error</code> <code>fatal</code></li>
+      <li>Required: <code>app</code>, <code>level</code>, <code>message</code></li>
+      <li>Optional: <code>source</code>, <code>timestamp</code> (RFC3339), <code>meta</code></li>
+      <li>Auth: <code>Authorization: Bearer &lt;token&gt;</code></li>
+    </ul>
+
+    <h2>Sink status</h2>
+    <p>
+      <span class="pill idle">idle</span>
+      <span class="pill sending">sending</span>
+      <span class="pill ok">ok</span>
+      <span class="pill fail">unable</span>
+    </p>
+
+    <h2>Live check (browser helper)</h2>
+    <div class="live">
+      <label>
+        Client token
+        <input id="live-token" type="text" placeholder="TINY_LOG_CLIENT_TOKEN" style="min-width:14rem;margin-left:0.35rem" />
+      </label>
+      <button type="button" id="live-send">Send test log</button>
+      <span id="live-result">idle</span>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button type="button" class="active" data-tab="go">Go</button>
+      <button type="button" data-tab="node">Node.js</button>
+      <button type="button" data-tab="js">JavaScript (browser)</button>
+    </div>
+
+    <section class="panel active" id="tab-go">
+      <h3>Helper</h3>
+      <div class="code-wrap">
+        <header>
+          <span>/tinylog.go</span>
+          <button type="button" class="copy" data-copy="go-src">Copy</button>
+        </header>
+        <pre id="go-src" class="loading">Loading…</pre>
+      </div>
+      <h3>Fiber usage</h3>
+      <div class="code-wrap">
+        <header><span>usage</span><button type="button" class="copy" data-copy="go-use">Copy</button></header>
+        <pre id="go-use">tl := tinylog.New(tinylog.Config{
+  BaseURL: os.Getenv("TINY_LOG_URL"),
+  APIKey:  os.Getenv("TINY_LOG_API_KEY"),
+  App:     "my-fiber-api",
+  Source:  "fiber",
+  OnUnable: func(err error, entries []tinylog.Entry) {
+    log.Printf("unable to send log: %v", err)
+  },
+})
+
+_ = tl.Log(ctx, tinylog.Info, "hello", map[string]any{"path": "/"})</pre>
+      </div>
+    </section>
+
+    <section class="panel" id="tab-node">
+      <h3>Helper</h3>
+      <div class="code-wrap">
+        <header>
+          <span>/tinylog.mjs</span>
+          <button type="button" class="copy" data-copy="node-src">Copy</button>
+        </header>
+        <pre id="node-src" class="loading">Loading…</pre>
+      </div>
+      <h3>Usage</h3>
+      <div class="code-wrap">
+        <header><span>usage</span><button type="button" class="copy" data-copy="node-use">Copy</button></header>
+        <pre id="node-use">import { TinyLogClient } from "./tinylog.mjs";
+
+const tl = new TinyLogClient({
+  baseUrl: process.env.TINY_LOG_URL,
+  apiKey: process.env.TINY_LOG_API_KEY,
+  app: "my-node-api",
+  onUnable(err) { console.error("unable to send log", err.message); },
+});
+
+await tl.log("info", "hello", { path: "/" });</pre>
+      </div>
+    </section>
+
+    <section class="panel" id="tab-js">
+      <div class="callout">
+        Use <code>TINY_LOG_CLIENT_TOKEN</code> only in the browser — never the server API key.
+      </div>
+      <h3>Helper</h3>
+      <div class="code-wrap">
+        <header>
+          <span>/tinylog.js</span>
+          <button type="button" class="copy" data-copy="js-src">Copy</button>
+        </header>
+        <pre id="js-src" class="loading">Loading…</pre>
+      </div>
+      <h3>Usage</h3>
+      <div class="code-wrap">
+        <header><span>usage</span><button type="button" class="copy" data-copy="js-use">Copy</button></header>
+        <pre id="js-use">&lt;script src="https://your-tiny-log/tinylog.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  const tl = new TinyLogBrowser({
+    baseUrl: "https://your-tiny-log",
+    clientToken: "YOUR_CLIENT_TOKEN",
+    app: "web-ui",
+    onUnable(err) { console.warn("unable to send log", err); },
+  });
+  tl.log("info", "page loaded", { path: location.pathname });
+&lt;/script&gt;</pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="/tinylog.js"></script>
+  <script>
+    const tabs = document.querySelectorAll(".tabs button");
+    const panels = document.querySelectorAll(".panel");
+    tabs.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        tabs.forEach((b) => b.classList.remove("active"));
+        panels.forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+      });
+    });
+
+    async function loadSource(id, url) {
+      const el = document.getElementById(id);
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(String(res.status));
+        el.textContent = await res.text();
+        el.classList.remove("loading");
+      } catch (err) {
+        el.textContent = "Failed to load " + url + ": " + err;
+        el.classList.remove("loading");
+      }
+    }
+
+    loadSource("go-src", "/tinylog.go");
+    loadSource("node-src", "/tinylog.mjs");
+    loadSource("js-src", "/tinylog.js");
+
+    document.querySelectorAll("button.copy").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const el = document.getElementById(btn.dataset.copy);
+        if (!el) return;
+        try {
+          await navigator.clipboard.writeText(el.textContent);
+          const prev = btn.textContent;
+          btn.textContent = "Copied";
+          setTimeout(() => (btn.textContent = prev), 1200);
+        } catch (_) {
+          btn.textContent = "Failed";
+        }
+      });
+    });
+
+    const tokenInput = document.getElementById("live-token");
+    const result = document.getElementById("live-result");
+    tokenInput.value = localStorage.getItem("tiny_log_client_token") || "";
+
+    document.getElementById("live-send").addEventListener("click", async () => {
+      const token = tokenInput.value.trim();
+      localStorage.setItem("tiny_log_client_token", token);
+      if (!token) {
+        result.className = "fail";
+        result.textContent = "unable: set client token";
+        return;
+      }
+      result.className = "";
+      result.textContent = "sending…";
+      const tl = new TinyLogBrowser({
+        baseUrl: location.origin,
+        clientToken: token,
+        app: "clients-page",
+        source: "browser",
+        onUnable(err) {
+          result.className = "fail";
+          result.textContent = "unable: " + (err && err.message ? err.message : err);
+        },
+      });
+      try {
+        await tl.log("info", "clients page live check", {
+          path: location.pathname,
+          ts: Date.now(),
+        });
+        result.className = "ok";
+        result.textContent = "ok (status=" + tl.status + ")";
+      } catch (err) {
+        result.className = "fail";
+        result.textContent = "unable: " + (err && err.message ? err.message : err);
+      }
+    });
+  </script>
+</body>
+</html>

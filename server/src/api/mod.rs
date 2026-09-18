@@ -13,6 +13,7 @@ use axum::Router;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/health", get(health::health))
+        .route("/ready", get(health::ready_or_503))
         .route("/api/v1/info", get(health::info))
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/setup", post(auth::setup))

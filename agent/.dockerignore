@@ -1,0 +1,7 @@
+target
+.git
+.gitignore
+*.md
+.dockerignore
+docker-compose*.yml
+*.example.toml

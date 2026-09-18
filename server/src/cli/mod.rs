@@ -47,11 +47,15 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     use crate::retention;
     use crate::web;
     use axum::extract::DefaultBodyLimit;
+    use axum::http::{header, HeaderValue};
     use axum::routing::get;
     use axum::Router;
     use std::net::SocketAddr;
     use tower_http::cors::{AllowOrigin, CorsLayer};
+    use tower_http::set_header::SetResponseHeaderLayer;
     use tower_http::trace::TraceLayer;
+
+    warn_prod_config(&config);
 
     let addr_str = config.bind_addr();
     let max_body = config.max_body_mb * 1024 * 1024;
@@ -88,9 +92,26 @@ async fn serve(config: Config) -> anyhow::Result<()> {
         .route("/settings", get(web::settings_page))
         .route("/monitor", get(web::monitor_page))
         .route("/swagger", get(web::swagger_page))
+        .route("/clients", get(web::clients_page))
         .route("/openapi.json", get(web::openapi_spec))
         .route("/{file}", get(web::static_asset))
         .layer(DefaultBodyLimit::max(max_body))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -123,7 +144,50 @@ async fn serve(config: Config) -> anyhow::Result<()> {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await?;
 
+    tracing::info!("server_stopped");
     Ok(())
+}
+
+fn warn_prod_config(config: &Config) {
+    if config.api_key.is_none() {
+        tracing::warn!("TINY_LOG_API_KEY unset — agent/log ingest will reject requests");
+    }
+    if config.client_token.is_none() {
+        tracing::warn!("TINY_LOG_CLIENT_TOKEN unset — browser client ingest disabled");
+    }
+    if config.is_anonymous() {
+        tracing::warn!("auth_mode=anonymous — UI has no login gate; use only on trusted networks");
+    }
+    if !config.cookie_secure && !config.is_anonymous() {
+        tracing::warn!("TINY_LOG_COOKIE_SECURE=false — session cookies can leak over HTTP");
+    }
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            tracing::error!(error = %err, "ctrl_c_handler_failed");
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(err) => tracing::error!(error = %err, "sigterm_handler_failed"),
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => tracing::info!(signal = "SIGINT", "shutdown_requested"),
+        _ = terminate => tracing::info!(signal = "SIGTERM", "shutdown_requested"),
+    }
 }

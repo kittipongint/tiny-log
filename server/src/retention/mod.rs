@@ -68,6 +68,8 @@ pub fn spawn_worker(logs_db: SqlitePool, system_db: SqlitePool, metrics_db: Sqli
                     tracing::error!(error = %err, "retention_worker_error");
                 }
             }
+            // Keep WAL files bounded even when nothing was deleted.
+            crate::state::checkpoint_all(&logs_db, &system_db, &metrics_db).await;
         }
     });
 }

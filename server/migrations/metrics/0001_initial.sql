@@ -7,7 +7,10 @@ CREATE TABLE IF NOT EXISTS host_samples (
     mem_total_bytes INTEGER,
     disk_used_bytes INTEGER,
     disk_total_bytes INTEGER,
-    load1 REAL
+    load1 REAL,
+    load5 REAL,
+    load15 REAL,
+    n_cpus INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_host_samples_host_ts
@@ -22,7 +25,12 @@ CREATE TABLE IF NOT EXISTS service_checks (
     status TEXT NOT NULL,
     latency_ms INTEGER,
     message TEXT,
-    meta_json TEXT
+    meta_json TEXT,
+    cpu_pct REAL,
+    mem_used_bytes INTEGER,
+    mem_limit_bytes INTEGER,
+    load_hint TEXT,
+    recommend TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_service_checks_host_ts

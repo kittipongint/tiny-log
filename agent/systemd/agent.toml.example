@@ -1,0 +1,28 @@
+# /etc/tiny-log/agent.toml — bare metal (no Docker)
+system_interval_secs = 60
+service_interval_secs = 120
+docker = false
+disk_path = "/"
+
+# Optional service checks — edit/remove as needed
+[[service]]
+name = "sshd"
+kind = "process"
+match = "sshd"
+
+# [[service]]
+# name = "nginx"
+# kind = "http"
+# url = "http://127.0.0.1/health"
+# timeout_ms = 2000
+
+# [[service]]
+# name = "mysql"
+# kind = "tcp"
+# addr = "127.0.0.1:3306"
+# timeout_ms = 2000
+
+# [[service]]
+# name = "mysql-daemon"
+# kind = "process"
+# match = "mysqld"

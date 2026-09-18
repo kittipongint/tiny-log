@@ -12,7 +12,7 @@ use tokio::fs;
 
 pub async fn root(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let admin = db::admin::get_admin(&state.system_db).await.ok().flatten();
-    if admin.is_none() {
+    if admin.is_none() && !state.config.is_anonymous() {
         return serve_file(&state, "setup.html").await;
     }
 
@@ -43,7 +43,7 @@ pub async fn setup_page(State(state): State<AppState>) -> impl IntoResponse {
 
 pub async fn settings_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let admin = db::admin::get_admin(&state.system_db).await.ok().flatten();
-    if admin.is_none() {
+    if admin.is_none() && !state.config.is_anonymous() {
         return redirect("/setup");
     }
     match require_admin(&state, &jar).await {
@@ -54,7 +54,7 @@ pub async fn settings_page(State(state): State<AppState>, jar: CookieJar) -> imp
 
 pub async fn monitor_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let admin = db::admin::get_admin(&state.system_db).await.ok().flatten();
-    if admin.is_none() {
+    if admin.is_none() && !state.config.is_anonymous() {
         return redirect("/setup");
     }
     match require_admin(&state, &jar).await {
@@ -65,6 +65,10 @@ pub async fn monitor_page(State(state): State<AppState>, jar: CookieJar) -> impl
 
 pub async fn swagger_page(State(state): State<AppState>) -> impl IntoResponse {
     serve_file(&state, "swagger.html").await
+}
+
+pub async fn clients_page(State(state): State<AppState>) -> impl IntoResponse {
+    serve_file(&state, "clients.html").await
 }
 
 pub async fn openapi_spec(State(state): State<AppState>) -> impl IntoResponse {
@@ -103,6 +107,9 @@ pub async fn static_asset(
             | "settings.js"
             | "setup.js"
             | "monitor.js"
+            | "tinylog.js"
+            | "tinylog.mjs"
+            | "tinylog.go"
             | "style.css"
     );
     if !allowed {
@@ -126,9 +133,10 @@ async fn read_asset(path: PathBuf) -> AppResult<(HeaderValue, Vec<u8>)> {
         .map_err(|_| crate::error::AppError::NotFound)?;
     let content_type = match path.extension().and_then(|e| e.to_str()) {
         Some("html") => "text/html; charset=utf-8",
-        Some("js") => "application/javascript; charset=utf-8",
+        Some("js") | Some("mjs") => "application/javascript; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
         Some("json") => "application/json; charset=utf-8",
+        Some("go") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     };
     Ok((HeaderValue::from_static(content_type), bytes))
