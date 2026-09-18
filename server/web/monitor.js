@@ -39,9 +39,45 @@ function fmtBytes(n) {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+/** Same unit for both sides: "11.12/128.0 MB" */
+function fmtBytesPair(used, total) {
+  if (used == null || total == null || Number(total) <= 0) return null;
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let scale = Number(total);
+  let i = 0;
+  while (scale >= 1024 && i < units.length - 1) {
+    scale /= 1024;
+    i += 1;
+  }
+  const div = 1024 ** i;
+  const u = Number(used) / div;
+  const t = Number(total) / div;
+  if (i === 0) return `${u.toFixed(0)}/${t.toFixed(0)} ${units[i]}`;
+  return `${u.toFixed(2)}/${t.toFixed(1)} ${units[i]}`;
+}
+
 function fmtPct(n) {
   if (n == null || Number.isNaN(Number(n))) return "—";
   return `${Number(n).toFixed(1)}%`;
+}
+
+/** Same unit for both sides: "0.44/4.0 cores" */
+function fmtCoresPair(used, total) {
+  if (used == null || total == null || Number(total) <= 0) return null;
+  return `${Number(used).toFixed(2)}/${Number(total).toFixed(1)} cores`;
+}
+
+function fmtUsage(pct, used, total, formatPair = fmtBytesPair) {
+  const pair = formatPair(used, total);
+  const p =
+    pct != null && !Number.isNaN(Number(pct))
+      ? Number(pct)
+      : used != null && total
+        ? (Number(used) / Number(total)) * 100
+        : null;
+  if (pair && p != null) return `${pair} (${p.toFixed(0)}%)`;
+  if (pair) return pair;
+  return fmtPct(p);
 }
 
 function fmtTime(iso) {
@@ -60,19 +96,36 @@ function barLevel(pct) {
   return "ok";
 }
 
-function metricCell(pct) {
+function metricCell(pct, used, total, formatPair = fmtBytesPair) {
   const wrap = document.createElement("div");
   wrap.className = "metric-cell";
+  const resolvedPct =
+    pct != null && !Number.isNaN(Number(pct))
+      ? Number(pct)
+      : used != null && total
+        ? (Number(used) / Number(total)) * 100
+        : null;
   const label = document.createElement("span");
   label.className = "metric-pct";
-  label.textContent = fmtPct(pct);
+  label.textContent = fmtUsage(resolvedPct, used, total, formatPair);
   const track = document.createElement("div");
-  track.className = `metric-bar metric-bar-${barLevel(pct)}`;
+  track.className = `metric-bar metric-bar-${barLevel(resolvedPct)}`;
   const fill = document.createElement("span");
-  fill.style.width = `${Math.min(100, Math.max(0, Number(pct) || 0))}%`;
+  fill.style.width = `${Math.min(100, Math.max(0, resolvedPct || 0))}%`;
   track.appendChild(fill);
   wrap.append(label, track);
   return wrap;
+}
+
+/** Host: cpu_pct is 0–100 of whole machine. Service: cpu_pct is core-% (may exceed 100). */
+function cpuMetricCell(pct, nCpus, mode = "host") {
+  if (pct == null || Number.isNaN(Number(pct))) return metricCell(null);
+  const p = Number(pct);
+  if (nCpus == null || Number(nCpus) <= 0) return metricCell(p);
+  const n = Number(nCpus);
+  const used = mode === "host" ? (p / 100) * n : p / 100;
+  const displayPct = mode === "host" ? p : (used / n) * 100;
+  return metricCell(displayPct, used, n, fmtCoresPair);
 }
 
 function badge(kind, value) {
@@ -175,11 +228,11 @@ function renderHosts(hosts) {
     tdSys.appendChild(sysWrap);
 
     const tdCpu = document.createElement("td");
-    tdCpu.appendChild(metricCell(h.cpu_pct));
+    tdCpu.appendChild(cpuMetricCell(h.cpu_pct, h.n_cpus, "host"));
     const tdMem = document.createElement("td");
-    tdMem.appendChild(metricCell(h.mem_pct));
+    tdMem.appendChild(metricCell(h.mem_pct, h.mem_used_bytes, h.mem_total_bytes));
     const tdDisk = document.createElement("td");
-    tdDisk.appendChild(metricCell(h.disk_pct));
+    tdDisk.appendChild(metricCell(h.disk_pct, h.disk_used_bytes, h.disk_total_bytes));
 
     const tdLoad = document.createElement("td");
     tdLoad.className = "mono";
@@ -233,18 +286,20 @@ function renderServices(services) {
     tdSvc.textContent = s.service;
     const tdStatus = document.createElement("td");
     tdStatus.appendChild(badge("status", s.status));
+    const hostN =
+      hostsCache.find((h) => h.host === s.host)?.n_cpus ?? null;
     const tdCpu = document.createElement("td");
-    tdCpu.appendChild(metricCell(s.cpu_pct));
+    tdCpu.appendChild(cpuMetricCell(s.cpu_pct, hostN, "cores"));
     const tdMem = document.createElement("td");
-    if (memPct != null) {
-      const cell = metricCell(memPct);
-      cell.title = `${fmtBytes(s.mem_used_bytes)} / ${fmtBytes(s.mem_limit_bytes)}`;
-      tdMem.appendChild(cell);
+    if (s.mem_used_bytes != null && s.mem_limit_bytes) {
+      tdMem.appendChild(
+        metricCell(memPct, s.mem_used_bytes, s.mem_limit_bytes)
+      );
     } else if (s.mem_used_bytes != null) {
       tdMem.className = "mono";
       tdMem.textContent = fmtBytes(s.mem_used_bytes);
     } else {
-      tdMem.textContent = "—";
+      tdMem.appendChild(metricCell(null));
     }
     const tdLoad = document.createElement("td");
     tdLoad.appendChild(badge("load", s.load_hint || "—"));
@@ -272,6 +327,26 @@ async function selectHost(host) {
   detailMeta.textContent = h
     ? `Updated ${fmtTime(h.timestamp)} · headroom ${fmtPct(h.headroom_pct)}`
     : "";
+  const sparkFigs = document.querySelectorAll(".spark-card figcaption");
+  if (h && sparkFigs.length >= 3) {
+    const usedCores =
+      h.cpu_pct != null && h.n_cpus
+        ? (Number(h.cpu_pct) / 100) * Number(h.n_cpus)
+        : null;
+    sparkFigs[0].textContent = h.n_cpus
+      ? `CPU · ${fmtUsage(h.cpu_pct, usedCores, h.n_cpus, fmtCoresPair)}`
+      : `CPU · ${fmtPct(h.cpu_pct)}`;
+    sparkFigs[1].textContent = `Memory · ${fmtUsage(
+      h.mem_pct,
+      h.mem_used_bytes,
+      h.mem_total_bytes
+    )}`;
+    sparkFigs[2].textContent = `Disk · ${fmtUsage(
+      h.disk_pct,
+      h.disk_used_bytes,
+      h.disk_total_bytes
+    )}`;
+  }
   detailForecast.textContent = "Loading…";
   document.getElementById("spark-cpu").replaceChildren();
   document.getElementById("spark-mem").replaceChildren();

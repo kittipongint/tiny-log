@@ -157,15 +157,16 @@ label {
 }
 .monitor h1, .monitor h2 { margin: 0 0 0.75rem; }
 
-.systems-table .metric-cell {
+.log-table .metric-cell {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  min-width: 5.5rem;
+  min-width: 11rem;
 }
 .metric-pct {
   font-family: var(--mono);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 .metric-bar {
   height: 4px;
