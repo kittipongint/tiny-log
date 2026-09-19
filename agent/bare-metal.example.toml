@@ -7,7 +7,15 @@
 system_interval_secs = 60
 service_interval_secs = 120
 docker = false
-disk_path = "/"
+
+[[disk]]
+name = "root"
+path = "/"
+
+# Second mount (same host_name — shows as a child disk row under this server):
+# [[disk]]
+# name = "data"
+# path = "/mnt/data"
 
 [[service]]
 name = "mysql"

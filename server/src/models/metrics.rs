@@ -10,6 +10,15 @@ pub struct MetricsBatchRequest {
     pub services: Vec<ServiceCheckInput>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DiskSample {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub used_bytes: Option<i64>,
+    pub total_bytes: Option<i64>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct HostSampleInput {
     pub cpu_pct: Option<f64>,
@@ -17,6 +26,8 @@ pub struct HostSampleInput {
     pub mem_total_bytes: Option<i64>,
     pub disk_used_bytes: Option<i64>,
     pub disk_total_bytes: Option<i64>,
+    #[serde(default)]
+    pub disks: Vec<DiskSample>,
     pub load1: Option<f64>,
     pub load5: Option<f64>,
     pub load15: Option<f64>,
@@ -48,6 +59,8 @@ pub struct HostSample {
     pub mem_total_bytes: Option<i64>,
     pub disk_used_bytes: Option<i64>,
     pub disk_total_bytes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disks: Vec<DiskSample>,
     pub load1: Option<f64>,
     pub load5: Option<f64>,
     pub load15: Option<f64>,
@@ -65,6 +78,8 @@ pub struct HostOverview {
     pub mem_total_bytes: Option<i64>,
     pub disk_used_bytes: Option<i64>,
     pub disk_total_bytes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disks: Vec<DiskSample>,
     pub load1: Option<f64>,
     pub load5: Option<f64>,
     pub load15: Option<f64>,
@@ -79,7 +94,8 @@ pub struct HostOverview {
 impl HostSample {
     pub fn into_overview(self) -> HostOverview {
         let mem_pct = pct(self.mem_used_bytes, self.mem_total_bytes);
-        let disk_pct = pct(self.disk_used_bytes, self.disk_total_bytes);
+        let disk_pct = worst_disk_pct(&self.disks)
+            .or_else(|| pct(self.disk_used_bytes, self.disk_total_bytes));
         let load_per_cpu = match (self.load1, self.n_cpus) {
             (Some(l), Some(n)) if n > 0 => Some(l / n as f64),
             _ => None,
@@ -100,6 +116,7 @@ impl HostSample {
             mem_total_bytes: self.mem_total_bytes,
             disk_used_bytes: self.disk_used_bytes,
             disk_total_bytes: self.disk_total_bytes,
+            disks: self.disks,
             load1: self.load1,
             load5: self.load5,
             load15: self.load15,
@@ -111,6 +128,16 @@ impl HostSample {
             recommend,
         }
     }
+}
+
+pub fn worst_disk_pct(disks: &[DiskSample]) -> Option<f64> {
+    disks
+        .iter()
+        .filter_map(|d| pct(d.used_bytes, d.total_bytes))
+        .fold(None, |acc: Option<f64>, p| match acc {
+            Some(a) if a >= p => Some(a),
+            _ => Some(p),
+        })
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -15,4 +15,12 @@ system_interval_secs = 60
 service_interval_secs = 120
 docker = true
 docker_sock = "/var/run/docker.sock"
-disk_path = "/"
+
+[[disk]]
+name = "root"
+path = "/"
+
+# Host bind-mounts for extra disks (agent must see the mount path):
+# [[disk]]
+# name = "data"
+# path = "/mnt/data"

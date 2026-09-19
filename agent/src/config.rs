@@ -13,8 +13,15 @@ pub struct AgentConfig {
     pub service_interval_secs: u64,
     pub docker_enabled: bool,
     pub docker_sock: PathBuf,
-    pub disk_path: PathBuf,
+    /// Mounts to sample; at least one (defaults to `/` as `root`).
+    pub disks: Vec<DiskMount>,
     pub services: Vec<ServiceConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiskMount {
+    pub name: String,
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -28,14 +35,23 @@ pub struct ServiceConfig {
     pub timeout_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct DiskFileConfig {
+    name: Option<String>,
+    path: String,
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct FileConfig {
     system_interval_secs: Option<u64>,
     service_interval_secs: Option<u64>,
     docker: Option<bool>,
     docker_sock: Option<String>,
+    /// Legacy single-disk path (used when `[[disk]]` is empty).
     disk_path: Option<String>,
     host_name: Option<String>,
+    #[serde(default)]
+    disk: Vec<DiskFileConfig>,
     #[serde(default)]
     service: Vec<ServiceConfig>,
 }
@@ -51,6 +67,8 @@ impl AgentConfig {
         } else {
             FileConfig::default()
         };
+
+        let disks = resolve_disks(&file_cfg)?;
 
         let url = env::var("TINY_LOG_URL").context("TINY_LOG_URL is required")?;
         let api_key = env::var("TINY_LOG_API_KEY").context("TINY_LOG_API_KEY is required")?;
@@ -85,13 +103,6 @@ impl AgentConfig {
             Err(_) => file_cfg.docker.unwrap_or_else(|| docker_sock.exists()),
         };
 
-        let disk_path = PathBuf::from(
-            env::var("TINY_LOG_DISK_PATH")
-                .ok()
-                .or(file_cfg.disk_path)
-                .unwrap_or_else(|| "/".into()),
-        );
-
         if url.trim().is_empty() || api_key.trim().is_empty() {
             bail!("TINY_LOG_URL and TINY_LOG_API_KEY must be non-empty");
         }
@@ -104,10 +115,60 @@ impl AgentConfig {
             service_interval_secs,
             docker_enabled,
             docker_sock,
-            disk_path,
+            disks,
             services: file_cfg.service,
         })
     }
+}
+
+fn resolve_disks(file_cfg: &FileConfig) -> Result<Vec<DiskMount>> {
+    if !file_cfg.disk.is_empty() {
+        let mut out = Vec::with_capacity(file_cfg.disk.len());
+        let mut names = std::collections::HashSet::new();
+        for d in &file_cfg.disk {
+            let path = d.path.trim();
+            if path.is_empty() {
+                bail!("[[disk]] path must be non-empty");
+            }
+            let name = d
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| default_disk_name(path));
+            if !names.insert(name.clone()) {
+                bail!("duplicate [[disk]] name: {name}");
+            }
+            out.push(DiskMount {
+                name,
+                path: PathBuf::from(path),
+            });
+        }
+        return Ok(out);
+    }
+
+    let path = env::var("TINY_LOG_DISK_PATH")
+        .ok()
+        .or_else(|| file_cfg.disk_path.clone())
+        .unwrap_or_else(|| "/".into());
+    Ok(vec![DiskMount {
+        name: default_disk_name(&path),
+        path: PathBuf::from(path),
+    }])
+}
+
+fn default_disk_name(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty() || trimmed == "/" {
+        return "root".into();
+    }
+    PathBuf::from(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("disk")
+        .to_string()
 }
 
 fn clamp_interval(v: u64) -> u64 {

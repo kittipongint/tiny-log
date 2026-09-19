@@ -211,6 +211,37 @@ label {
 .systems-row.selected td {
   background: rgba(61, 156, 240, 0.12);
 }
+.systems-disk-row {
+  cursor: pointer;
+}
+.systems-disk-row:hover td {
+  background: rgba(61, 156, 240, 0.04);
+}
+.systems-disk-row.selected td {
+  background: rgba(61, 156, 240, 0.08);
+}
+.systems-disk-row td {
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+.disk-row-label {
+  padding-left: 1.5rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.disk-row-label::before {
+  content: "↳ ";
+}
+.disk-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.disk-metric-name {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
 .systems-table .mono {
   font-family: var(--mono);
   font-size: 0.85rem;

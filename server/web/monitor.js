@@ -190,6 +190,35 @@ function sparkline(values, color) {
   return svg;
 }
 
+function hostDisks(h) {
+  if (Array.isArray(h.disks) && h.disks.length) return h.disks;
+  if (h.disk_used_bytes != null || h.disk_total_bytes != null) {
+    return [
+      {
+        name: "disk",
+        used_bytes: h.disk_used_bytes,
+        total_bytes: h.disk_total_bytes,
+      },
+    ];
+  }
+  return [];
+}
+
+function appendDiskMetric(td, disk) {
+  const wrap = document.createElement("div");
+  wrap.className = "disk-metric";
+  const name = document.createElement("span");
+  name.className = "disk-metric-name muted";
+  name.textContent = disk.name || disk.path || "disk";
+  if (disk.path) name.title = disk.path;
+  const pct =
+    disk.used_bytes != null && disk.total_bytes
+      ? (Number(disk.used_bytes) / Number(disk.total_bytes)) * 100
+      : null;
+  wrap.append(name, metricCell(pct, disk.used_bytes, disk.total_bytes));
+  td.appendChild(wrap);
+}
+
 function renderHosts(hosts) {
   hostsCache = hosts;
   hostRows.replaceChildren();
@@ -205,6 +234,7 @@ function renderHosts(hosts) {
     return;
   }
   for (const h of hosts) {
+    const disks = hostDisks(h);
     const tr = document.createElement("tr");
     tr.className = "systems-row";
     if (selectedHost === h.host) tr.classList.add("selected");
@@ -232,7 +262,25 @@ function renderHosts(hosts) {
     const tdMem = document.createElement("td");
     tdMem.appendChild(metricCell(h.mem_pct, h.mem_used_bytes, h.mem_total_bytes));
     const tdDisk = document.createElement("td");
-    tdDisk.appendChild(metricCell(h.disk_pct, h.disk_used_bytes, h.disk_total_bytes));
+    if (disks.length <= 1) {
+      const d = disks[0];
+      if (d) {
+        tdDisk.appendChild(
+          metricCell(
+            h.disk_pct,
+            d.used_bytes ?? h.disk_used_bytes,
+            d.total_bytes ?? h.disk_total_bytes
+          )
+        );
+      } else {
+        tdDisk.appendChild(
+          metricCell(h.disk_pct, h.disk_used_bytes, h.disk_total_bytes)
+        );
+      }
+    } else {
+      tdDisk.className = "muted mono";
+      tdDisk.textContent = `${disks.length} disks`;
+    }
 
     const tdLoad = document.createElement("td");
     tdLoad.className = "mono";
@@ -248,6 +296,33 @@ function renderHosts(hosts) {
 
     tr.append(tdSys, tdCpu, tdMem, tdDisk, tdLoad, tdRec);
     hostRows.appendChild(tr);
+
+    if (disks.length > 1) {
+      for (const d of disks) {
+        const dtr = document.createElement("tr");
+        dtr.className = "systems-disk-row";
+        if (selectedHost === h.host) dtr.classList.add("selected");
+        dtr.addEventListener("click", () => selectHost(h.host));
+
+        const dSys = document.createElement("td");
+        const label = document.createElement("div");
+        label.className = "disk-row-label";
+        label.textContent = d.name || "disk";
+        if (d.path) label.title = d.path;
+        dSys.appendChild(label);
+
+        const empty = () => {
+          const td = document.createElement("td");
+          td.className = "muted";
+          td.textContent = "";
+          return td;
+        };
+        const dDisk = document.createElement("td");
+        appendDiskMetric(dDisk, d);
+        dtr.append(dSys, empty(), empty(), dDisk, empty(), empty());
+        hostRows.appendChild(dtr);
+      }
+    }
   }
   if (selectedHost && !hosts.some((h) => h.host === selectedHost)) {
     selectedHost = null;
@@ -341,11 +416,24 @@ async function selectHost(host) {
       h.mem_used_bytes,
       h.mem_total_bytes
     )}`;
-    sparkFigs[2].textContent = `Disk · ${fmtUsage(
-      h.disk_pct,
-      h.disk_used_bytes,
-      h.disk_total_bytes
-    )}`;
+    const disks = hostDisks(h);
+    if (disks.length > 1) {
+      sparkFigs[2].textContent = `Disk · ${disks
+        .map((d) => {
+          const p =
+            d.used_bytes != null && d.total_bytes
+              ? (Number(d.used_bytes) / Number(d.total_bytes)) * 100
+              : null;
+          return `${d.name} ${fmtUsage(p, d.used_bytes, d.total_bytes)}`;
+        })
+        .join(" · ")}`;
+    } else {
+      sparkFigs[2].textContent = `Disk · ${fmtUsage(
+        h.disk_pct,
+        h.disk_used_bytes,
+        h.disk_total_bytes
+      )}`;
+    }
   }
   detailForecast.textContent = "Loading…";
   document.getElementById("spark-cpu").replaceChildren();

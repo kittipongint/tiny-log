@@ -65,7 +65,10 @@ if [ ! -f "$TOML_FILE" ]; then
 system_interval_secs = 60
 service_interval_secs = 120
 docker = false
-disk_path = "/"
+
+[[disk]]
+name = "root"
+path = "/"
 EOF
   chmod 644 "$TOML_FILE"
 fi

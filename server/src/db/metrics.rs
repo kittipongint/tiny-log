@@ -1,9 +1,9 @@
 use crate::error::{AppError, AppResult};
 use crate::models::log::ms_to_rfc3339;
 use crate::models::metrics::{
-    eta_hours_to_threshold, host_recommend, linear_forecast, pct, CapacityForecast, HostCapacity,
-    HostSample, HostSampleInput, MetricsBatchRequest, MetricsHistoryQuery, ServiceCheck,
-    ServiceCheckInput,
+    eta_hours_to_threshold, host_recommend, linear_forecast, pct, worst_disk_pct, CapacityForecast,
+    DiskSample, HostCapacity, HostSample, HostSampleInput, MetricsBatchRequest, MetricsHistoryQuery,
+    ServiceCheck, ServiceCheckInput,
 };
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
@@ -41,12 +41,22 @@ async fn insert_batch_tx(
     services: &[ServiceCheckInput],
 ) -> AppResult<()> {
     if let Some(sys) = system {
+        let disks = normalize_disks(sys);
+        let (disk_used, disk_total) = primary_disk_bytes(&disks, sys);
+        let disks_json = if disks.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::to_string(&disks)
+                    .map_err(|_| AppError::bad_request("invalid disks json"))?,
+            )
+        };
         sqlx::query(
             r#"
             INSERT INTO host_samples (
                 timestamp_ms, host, cpu_pct, mem_used_bytes, mem_total_bytes,
-                disk_used_bytes, disk_total_bytes, load1, load5, load15, n_cpus
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                disk_used_bytes, disk_total_bytes, load1, load5, load15, n_cpus, disks_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(timestamp_ms)
@@ -54,12 +64,13 @@ async fn insert_batch_tx(
         .bind(sys.cpu_pct)
         .bind(sys.mem_used_bytes)
         .bind(sys.mem_total_bytes)
-        .bind(sys.disk_used_bytes)
-        .bind(sys.disk_total_bytes)
+        .bind(disk_used)
+        .bind(disk_total)
         .bind(sys.load1)
         .bind(sys.load5)
         .bind(sys.load15)
         .bind(sys.n_cpus)
+        .bind(disks_json)
         .execute(&mut *conn)
         .await?;
     }
@@ -120,6 +131,68 @@ fn normalize_recommend(raw: Option<&str>) -> Option<String> {
     matches!(v.as_str(), "ok" | "watch" | "scale_out" | "limit").then_some(v)
 }
 
+fn normalize_disks(sys: &HostSampleInput) -> Vec<DiskSample> {
+    let mut disks: Vec<DiskSample> = sys
+        .disks
+        .iter()
+        .filter_map(|d| {
+            let name = d.name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some(DiskSample {
+                name: name.to_string(),
+                path: d
+                    .path
+                    .as_ref()
+                    .map(|p| p.trim().to_string())
+                    .filter(|p| !p.is_empty()),
+                used_bytes: d.used_bytes,
+                total_bytes: d.total_bytes,
+            })
+        })
+        .collect();
+    if disks.is_empty() {
+        if sys.disk_used_bytes.is_some() || sys.disk_total_bytes.is_some() {
+            disks.push(DiskSample {
+                name: "disk".into(),
+                path: None,
+                used_bytes: sys.disk_used_bytes,
+                total_bytes: sys.disk_total_bytes,
+            });
+        }
+    }
+    disks
+}
+
+fn primary_disk_bytes(
+    disks: &[DiskSample],
+    sys: &HostSampleInput,
+) -> (Option<i64>, Option<i64>) {
+    let mut best: Option<&DiskSample> = None;
+    let mut best_pct = -1.0_f64;
+    for d in disks {
+        if let Some(p) = pct(d.used_bytes, d.total_bytes) {
+            if p >= best_pct {
+                best_pct = p;
+                best = Some(d);
+            }
+        }
+    }
+    if let Some(d) = best.or_else(|| disks.first()) {
+        return (d.used_bytes, d.total_bytes);
+    }
+    (sys.disk_used_bytes, sys.disk_total_bytes)
+}
+
+fn parse_disks_json(raw: Option<String>) -> AppResult<Vec<DiskSample>> {
+    match raw {
+        Some(s) if !s.trim().is_empty() => serde_json::from_str(&s)
+            .map_err(|e| AppError::internal(format!("corrupt disks_json: {e}"))),
+        _ => Ok(Vec::new()),
+    }
+}
+
 pub async fn list_hosts(pool: &SqlitePool) -> AppResult<Vec<String>> {
     let rows: Vec<(String,)> = sqlx::query_as(
         r#"
@@ -141,7 +214,8 @@ pub async fn latest_host_samples(pool: &SqlitePool) -> AppResult<Vec<HostSample>
     let rows = sqlx::query_as::<_, HostSampleRow>(
         r#"
         SELECT h.id, h.timestamp_ms, h.host, h.cpu_pct, h.mem_used_bytes, h.mem_total_bytes,
-               h.disk_used_bytes, h.disk_total_bytes, h.load1, h.load5, h.load15, h.n_cpus
+               h.disk_used_bytes, h.disk_total_bytes, h.load1, h.load5, h.load15, h.n_cpus,
+               h.disks_json
         FROM host_samples h
         INNER JOIN (
             SELECT host, MAX(timestamp_ms) AS max_ts
@@ -154,7 +228,7 @@ pub async fn latest_host_samples(pool: &SqlitePool) -> AppResult<Vec<HostSample>
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(HostSampleRow::into_sample).collect())
+    rows.into_iter().map(HostSampleRow::into_sample).collect()
 }
 
 pub async fn latest_service_checks(pool: &SqlitePool) -> AppResult<Vec<ServiceCheck>> {
@@ -192,7 +266,7 @@ pub async fn history_hosts(
     }
 
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
-        "SELECT id, timestamp_ms, host, cpu_pct, mem_used_bytes, mem_total_bytes, disk_used_bytes, disk_total_bytes, load1, load5, load15, n_cpus FROM host_samples WHERE host = ",
+        "SELECT id, timestamp_ms, host, cpu_pct, mem_used_bytes, mem_total_bytes, disk_used_bytes, disk_total_bytes, load1, load5, load15, n_cpus, disks_json FROM host_samples WHERE host = ",
     );
     qb.push_bind(host);
     if let Some(from) = &query.from {
@@ -207,7 +281,7 @@ pub async fn history_hosts(
     qb.push_bind(limit);
 
     let rows = qb.build_query_as::<HostSampleRow>().fetch_all(pool).await?;
-    Ok(rows.into_iter().map(HostSampleRow::into_sample).collect())
+    rows.into_iter().map(HostSampleRow::into_sample).collect()
 }
 
 pub async fn history_services(
@@ -248,7 +322,7 @@ pub async fn host_capacity(pool: &SqlitePool, host: &str) -> AppResult<HostCapac
     }
 
     let latest = sqlx::query_as::<_, HostSampleRow>(
-        "SELECT id, timestamp_ms, host, cpu_pct, mem_used_bytes, mem_total_bytes, disk_used_bytes, disk_total_bytes, load1, load5, load15, n_cpus FROM host_samples WHERE host = ? ORDER BY timestamp_ms DESC LIMIT 1",
+        "SELECT id, timestamp_ms, host, cpu_pct, mem_used_bytes, mem_total_bytes, disk_used_bytes, disk_total_bytes, load1, load5, load15, n_cpus, disks_json FROM host_samples WHERE host = ? ORDER BY timestamp_ms DESC LIMIT 1",
     )
     .bind(host)
     .fetch_optional(pool)
@@ -256,15 +330,16 @@ pub async fn host_capacity(pool: &SqlitePool, host: &str) -> AppResult<HostCapac
     .ok_or(AppError::NotFound)?;
 
     let history = sqlx::query_as::<_, HostSampleRow>(
-        "SELECT id, timestamp_ms, host, cpu_pct, mem_used_bytes, mem_total_bytes, disk_used_bytes, disk_total_bytes, load1, load5, load15, n_cpus FROM host_samples WHERE host = ? ORDER BY timestamp_ms DESC LIMIT 120",
+        "SELECT id, timestamp_ms, host, cpu_pct, mem_used_bytes, mem_total_bytes, disk_used_bytes, disk_total_bytes, load1, load5, load15, n_cpus, disks_json FROM host_samples WHERE host = ? ORDER BY timestamp_ms DESC LIMIT 120",
     )
     .bind(host)
     .fetch_all(pool)
     .await?;
 
-    let sample = latest.into_sample();
+    let sample = latest.into_sample()?;
     let mem_pct = pct(sample.mem_used_bytes, sample.mem_total_bytes);
-    let disk_pct = pct(sample.disk_used_bytes, sample.disk_total_bytes);
+    let disk_pct = worst_disk_pct(&sample.disks)
+        .or_else(|| pct(sample.disk_used_bytes, sample.disk_total_bytes));
     let load_per_cpu = match (sample.load1, sample.n_cpus) {
         (Some(l), Some(n)) if n > 0 => Some(l / n as f64),
         _ => None,
@@ -380,11 +455,25 @@ struct HostSampleRow {
     load5: Option<f64>,
     load15: Option<f64>,
     n_cpus: Option<i64>,
+    disks_json: Option<String>,
 }
 
 impl HostSampleRow {
-    fn into_sample(self) -> HostSample {
-        HostSample {
+    fn into_sample(self) -> AppResult<HostSample> {
+        let disks = parse_disks_json(self.disks_json)?;
+        let disks = if disks.is_empty()
+            && (self.disk_used_bytes.is_some() || self.disk_total_bytes.is_some())
+        {
+            vec![DiskSample {
+                name: "disk".into(),
+                path: None,
+                used_bytes: self.disk_used_bytes,
+                total_bytes: self.disk_total_bytes,
+            }]
+        } else {
+            disks
+        };
+        Ok(HostSample {
             id: self.id,
             timestamp: ms_to_rfc3339(self.timestamp_ms),
             host: self.host,
@@ -393,11 +482,12 @@ impl HostSampleRow {
             mem_total_bytes: self.mem_total_bytes,
             disk_used_bytes: self.disk_used_bytes,
             disk_total_bytes: self.disk_total_bytes,
+            disks,
             load1: self.load1,
             load5: self.load5,
             load15: self.load15,
             n_cpus: self.n_cpus,
-        }
+        })
     }
 }
 

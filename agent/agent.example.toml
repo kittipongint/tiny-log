@@ -8,8 +8,11 @@
 #   TINY_LOG_SYSTEM_INTERVAL_SECS / TINY_LOG_SERVICE_INTERVAL_SECS
 #   TINY_LOG_DOCKER / TINY_LOG_DOCKER_SOCK / TINY_LOG_DISK_PATH
 #
-# Host samples (system_interval): CPU, mem, disk, load1/5/15, n_cpus
+# Host samples (system_interval): CPU, mem, disks, load1/5/15, n_cpus
 # → server capacity API recommends ok | watch | scale_out | limit
+#
+# Disks: one host_name = one Systems row; multiple [[disk]] = child disk rows.
+# Legacy: disk_path = "/" (single mount named "root").
 #
 # Service checks (service_interval):
 #   http  — alive + latency; ES _cluster/health → load_hint (ok/watch/tight)
@@ -21,8 +24,15 @@ system_interval_secs = 60
 service_interval_secs = 120
 docker = true
 docker_sock = "/var/run/docker.sock"
-disk_path = "/"
 # host_name = "web-1"
+
+[[disk]]
+name = "root"
+path = "/"
+
+# [[disk]]
+# name = "data"
+# path = "/mnt/data"
 
 [[service]]
 name = "nginx"

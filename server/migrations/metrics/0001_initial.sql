@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS host_samples (
     load1 REAL,
     load5 REAL,
     load15 REAL,
-    n_cpus INTEGER
+    n_cpus INTEGER,
+    disks_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_host_samples_host_ts

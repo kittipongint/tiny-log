@@ -1,15 +1,25 @@
-use crate::config::AgentConfig;
+use crate::config::{AgentConfig, DiskMount};
 use anyhow::Result;
 use serde::Serialize;
 use std::path::Path;
+
+#[derive(Debug, Serialize)]
+pub struct DiskSample {
+    pub name: String,
+    pub path: String,
+    pub used_bytes: Option<i64>,
+    pub total_bytes: Option<i64>,
+}
 
 #[derive(Debug, Serialize)]
 pub struct SystemSample {
     pub cpu_pct: Option<f64>,
     pub mem_used_bytes: Option<i64>,
     pub mem_total_bytes: Option<i64>,
+    /// Primary / fullest disk (backward-compatible single-disk fields).
     pub disk_used_bytes: Option<i64>,
     pub disk_total_bytes: Option<i64>,
+    pub disks: Vec<DiskSample>,
     pub load1: Option<f64>,
     pub load5: Option<f64>,
     pub load15: Option<f64>,
@@ -18,7 +28,8 @@ pub struct SystemSample {
 
 pub async fn sample(cfg: &AgentConfig) -> Result<SystemSample> {
     let (mem_used, mem_total) = memory_bytes().unwrap_or((None, None));
-    let (disk_used, disk_total) = disk_bytes(&cfg.disk_path).unwrap_or((None, None));
+    let disks = sample_disks(&cfg.disks);
+    let (disk_used, disk_total) = primary_disk(&disks);
     let (load1, load5, load15) = loadavg();
     Ok(SystemSample {
         cpu_pct: cpu_pct().await,
@@ -26,11 +37,47 @@ pub async fn sample(cfg: &AgentConfig) -> Result<SystemSample> {
         mem_total_bytes: mem_total,
         disk_used_bytes: disk_used,
         disk_total_bytes: disk_total,
+        disks,
         load1,
         load5,
         load15,
         n_cpus: n_cpus(),
     })
+}
+
+fn sample_disks(mounts: &[DiskMount]) -> Vec<DiskSample> {
+    mounts
+        .iter()
+        .map(|m| {
+            let (used, total) = disk_bytes(&m.path).unwrap_or((None, None));
+            DiskSample {
+                name: m.name.clone(),
+                path: m.path.display().to_string(),
+                used_bytes: used,
+                total_bytes: total,
+            }
+        })
+        .collect()
+}
+
+/// Prefer the fullest mount for host-level disk_pct / recommend.
+fn primary_disk(disks: &[DiskSample]) -> (Option<i64>, Option<i64>) {
+    let mut best: Option<&DiskSample> = None;
+    let mut best_pct = -1.0_f64;
+    for d in disks {
+        let pct = match (d.used_bytes, d.total_bytes) {
+            (Some(u), Some(t)) if t > 0 => (u as f64 / t as f64) * 100.0,
+            _ => continue,
+        };
+        if pct >= best_pct {
+            best_pct = pct;
+            best = Some(d);
+        }
+    }
+    match best.or_else(|| disks.first()) {
+        Some(d) => (d.used_bytes, d.total_bytes),
+        None => (None, None),
+    }
 }
 
 fn loadavg() -> (Option<f64>, Option<f64>, Option<f64>) {
@@ -72,24 +119,23 @@ fn memory_bytes() -> Result<(Option<i64>, Option<i64>)> {
     {
         let raw = std::fs::read_to_string("/proc/meminfo")?;
         let mut total_kb = None;
-        let mut available_kb = None;
+        let mut avail_kb = None;
         for line in raw.lines() {
-            if let Some(v) = line.strip_prefix("MemTotal:") {
-                total_kb = parse_kb(v);
-            } else if let Some(v) = line.strip_prefix("MemAvailable:") {
-                available_kb = parse_kb(v);
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                total_kb = parse_kb(rest);
+            } else if let Some(rest) = line.strip_prefix("MemAvailable:") {
+                avail_kb = parse_kb(rest);
             }
         }
-        let total = total_kb.map(|v| v * 1024);
-        let used = match (total_kb, available_kb) {
-            (Some(t), Some(a)) => Some((t.saturating_sub(a)) * 1024),
+        let total = total_kb.map(|k| k.saturating_mul(1024));
+        let used = match (total_kb, avail_kb) {
+            (Some(t), Some(a)) => Some(t.saturating_sub(a).saturating_mul(1024)),
             _ => None,
         };
         Ok((used, total))
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = Path::new("/");
         Ok((None, None))
     }
 }

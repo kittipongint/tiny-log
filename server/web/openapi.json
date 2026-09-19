@@ -88,6 +88,19 @@
               "mem_total_bytes": { "type": "integer", "example": 4294967296 },
               "disk_used_bytes": { "type": "integer", "example": 50000000000 },
               "disk_total_bytes": { "type": "integer", "example": 100000000000 },
+              "disks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name"],
+                  "properties": {
+                    "name": { "type": "string", "example": "root" },
+                    "path": { "type": "string", "example": "/" },
+                    "used_bytes": { "type": "integer", "example": 50000000000 },
+                    "total_bytes": { "type": "integer", "example": 100000000000 }
+                  }
+                }
+              },
               "load1": { "type": "number", "example": 0.4 },
               "load5": { "type": "number", "example": 0.5 },
               "load15": { "type": "number", "example": 0.6 },
