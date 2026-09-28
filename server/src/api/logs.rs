@@ -1,7 +1,8 @@
 use crate::auth::middleware::{require_api_key, AuthUser};
 use crate::db;
 use crate::error::{AppError, AppResult};
-use crate::models::log::{BatchLogsRequest, LogEntry, LogQuery, NewLog};
+use crate::models::log::{BatchLogsRequest, InsertLog, LogEntry, LogQuery, NewLog};
+use crate::api::json::JsonBody;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -11,7 +12,7 @@ use serde_json::{json, Value};
 pub async fn create_log(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(body): Json<NewLog>,
+    JsonBody(body): JsonBody<NewLog>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     require_api_key(&state, &headers)?;
 
@@ -20,28 +21,17 @@ pub async fn create_log(
         .map_err(AppError::bad_request)?;
 
     let id = db::logs::insert_log(&state.logs_db, &insert).await?;
-
-    let entry = LogEntry {
-        id,
-        timestamp: crate::models::log::ms_to_rfc3339(insert.timestamp_ms),
-        app: insert.app,
-        level: insert.level,
-        source: insert.source,
-        message: insert.message,
-        meta: insert
-            .meta_json
-            .as_ref()
-            .and_then(|m| serde_json::from_str(m).ok()),
-    };
-    let _ = state.broadcaster.send(entry);
+    broadcast_inserted(&state, [(id, insert)]);
 
     Ok((StatusCode::OK, Json(json!({ "success": true, "id": id }))))
 }
 
+/// All-or-nothing: one invalid entry rejects the batch (400) and `rejected` lists every
+/// bad index, so a client can drop exactly those and resend the rest.
 pub async fn create_batch(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(body): Json<BatchLogsRequest>,
+    JsonBody(body): JsonBody<BatchLogsRequest>,
 ) -> AppResult<Json<Value>> {
     require_api_key(&state, &headers)?;
 
@@ -49,22 +39,44 @@ pub async fn create_batch(
         return Err(AppError::bad_request("logs array is empty"));
     }
     if body.logs.len() > state.config.max_batch {
-        return Err(AppError::PayloadTooLarge);
+        return Err(state.config.payload_too_large());
     }
 
     let mut inserts = Vec::with_capacity(body.logs.len());
-    for log in body.logs {
-        inserts.push(
-            log.validate_and_normalize()
-                .map_err(AppError::bad_request)?,
-        );
+    let mut rejected = Vec::new();
+    for (index, log) in body.logs.into_iter().enumerate() {
+        match log.validate_and_normalize() {
+            Ok(insert) => inserts.push(insert),
+            Err(error) => rejected.push((index, error)),
+        }
+    }
+    if !rejected.is_empty() {
+        return Err(AppError::Rejected(rejected));
     }
 
     let ids = db::logs::insert_logs_batch(&state.logs_db, &inserts).await?;
+    let count = ids.len();
+    broadcast_inserted(&state, ids.iter().copied().zip(inserts));
 
-    for (id, insert) in ids.iter().zip(inserts.into_iter()) {
+    Ok(Json(json!({
+        "success": true,
+        "ids": ids,
+        "count": count
+    })))
+}
+
+/// Feed live viewers. With nobody on /stream this costs nothing — no LogEntry is built
+/// and meta_json isn't re-parsed.
+pub(crate) fn broadcast_inserted(
+    state: &AppState,
+    rows: impl IntoIterator<Item = (i64, InsertLog)>,
+) {
+    if state.broadcaster.receiver_count() == 0 {
+        return;
+    }
+    for (id, insert) in rows {
         let entry = LogEntry {
-            id: *id,
+            id,
             timestamp: crate::models::log::ms_to_rfc3339(insert.timestamp_ms),
             app: insert.app,
             level: insert.level,
@@ -72,17 +84,11 @@ pub async fn create_batch(
             message: insert.message,
             meta: insert
                 .meta_json
-                .as_ref()
+                .as_deref()
                 .and_then(|m| serde_json::from_str(m).ok()),
         };
         let _ = state.broadcaster.send(entry);
     }
-
-    Ok(Json(json!({
-        "success": true,
-        "ids": ids,
-        "count": ids.len()
-    })))
 }
 
 pub async fn list_logs(

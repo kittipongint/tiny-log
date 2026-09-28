@@ -58,7 +58,7 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     warn_prod_config(&config);
 
     let addr_str = config.bind_addr();
-    let max_body = config.max_body_mb * 1024 * 1024;
+    let max_body = config.max_body_bytes();
     let cookie_secure = config.cookie_secure;
     let auth_mode = config.auth_mode.as_str().to_string();
     let cors_origin = config.cors_origin.clone();

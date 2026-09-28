@@ -38,6 +38,18 @@ pub struct Config {
 }
 
 impl Config {
+    /// Request body cap (TINY_LOG_MAX_BODY_MB) in bytes.
+    pub fn max_body_bytes(&self) -> usize {
+        self.max_body_mb * 1024 * 1024
+    }
+
+    pub fn payload_too_large(&self) -> crate::error::AppError {
+        crate::error::AppError::PayloadTooLarge {
+            max_batch: self.max_batch,
+            max_body_bytes: self.max_body_bytes(),
+        }
+    }
+
     pub fn from_env() -> Self {
         let retention_days = env_i64("TINY_LOG_RETENTION_DAYS", 30).clamp(1, 3650);
         let session_days = env_i64("TINY_LOG_SESSION_DAYS", 7).max(1);

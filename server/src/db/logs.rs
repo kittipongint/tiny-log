@@ -163,12 +163,44 @@ pub async fn list_apps(pool: &SqlitePool) -> AppResult<Vec<String>> {
     Ok(rows.into_iter().map(|(a,)| a).collect())
 }
 
+/// Rows per retention DELETE. Each chunk is its own short write transaction, so ingest
+/// waiting on busy_timeout (10s) gets the lock between chunks instead of 500ing.
+pub const DELETE_CHUNK: i64 = 5_000;
+
 pub async fn delete_older_than(pool: &SqlitePool, cutoff_ms: i64) -> AppResult<u64> {
-    let result = sqlx::query("DELETE FROM logs WHERE timestamp_ms < ?")
-        .bind(cutoff_ms)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected())
+    delete_in_chunks(pool, "logs", cutoff_ms, DELETE_CHUNK).await
+}
+
+/// Tables with a `timestamp_ms` column that retention trims.
+pub async fn delete_in_chunks(
+    pool: &SqlitePool,
+    table: &str,
+    cutoff_ms: i64,
+    chunk: i64,
+) -> AppResult<u64> {
+    let sql = match table {
+        "logs" => "DELETE FROM logs WHERE rowid IN \
+                   (SELECT rowid FROM logs WHERE timestamp_ms < ? LIMIT ?)",
+        "host_samples" => "DELETE FROM host_samples WHERE rowid IN \
+                   (SELECT rowid FROM host_samples WHERE timestamp_ms < ? LIMIT ?)",
+        "service_checks" => "DELETE FROM service_checks WHERE rowid IN \
+                   (SELECT rowid FROM service_checks WHERE timestamp_ms < ? LIMIT ?)",
+        other => return Err(AppError::internal(format!("no retention for table {other}"))),
+    };
+    let mut total = 0u64;
+    loop {
+        let n = sqlx::query(sql)
+            .bind(cutoff_ms)
+            .bind(chunk)
+            .execute(pool)
+            .await?
+            .rows_affected();
+        total += n;
+        if n < chunk as u64 {
+            return Ok(total);
+        }
+        tokio::task::yield_now().await;
+    }
 }
 
 pub async fn vacuum_incremental(pool: &SqlitePool) -> AppResult<()> {

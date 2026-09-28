@@ -1,6 +1,8 @@
 use crate::config::Config;
 use crate::models::log::LogEntry;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::sqlite::{
+    SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::path::Path;
@@ -151,42 +153,49 @@ fn db_open_err(name: &str, path: &Path, err: anyhow::Error) -> anyhow::Error {
     )
 }
 
-async fn connect_pool(url: &str, max_connections: u32) -> anyhow::Result<SqlitePool> {
-    let options = SqliteConnectOptions::from_str(url)?
+/// Every pooled connection gets the same settings: sqlx runs these PRAGMAs on each new
+/// connection, whereas a one-off `query("PRAGMA …").execute(pool)` only reaches whichever
+/// connection the pool hands out. auto_vacuum only takes effect on a brand-new file
+/// (sqlx sets it before journal_mode); an existing file needs one full VACUUM to switch.
+pub(crate) fn connect_options(url: &str) -> anyhow::Result<SqliteConnectOptions> {
+    Ok(SqliteConnectOptions::from_str(url)?
         .create_if_missing(true)
+        .auto_vacuum(SqliteAutoVacuum::Incremental)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_secs(10))
-        .foreign_keys(true);
+        .foreign_keys(true)
+        // keep temp tables/sorts off disk
+        .pragma("temp_store", "MEMORY")
+        // 64 MiB WAL cap after checkpoint reset
+        .pragma("journal_size_limit", "67108864")
+        // ~20 MiB page cache per connection (negative = KiB)
+        .pragma("cache_size", "-20000")
+        .pragma("wal_autocheckpoint", "1000"))
+}
 
+async fn connect_pool(url: &str, max_connections: u32) -> anyhow::Result<SqlitePool> {
     Ok(SqlitePoolOptions::new()
         .max_connections(max_connections)
         .min_connections(1)
         .acquire_timeout(Duration::from_secs(15))
         .idle_timeout(Some(Duration::from_secs(600)))
-        .connect_with(options)
+        .connect_with(connect_options(url)?)
         .await?)
 }
 
-/// Production SQLite defaults: cap WAL growth, keep temp off disk, fail fast on corruption.
+/// Fail fast on corruption; say so when an old file can't reclaim space incrementally.
 async fn harden_pool(pool: &SqlitePool, name: &str) -> anyhow::Result<()> {
-    sqlx::query("PRAGMA temp_store = MEMORY;")
-        .execute(pool)
+    let auto_vacuum: i64 = sqlx::query_scalar("PRAGMA auto_vacuum;")
+        .fetch_one(pool)
         .await?;
-    // 64 MiB WAL cap after checkpoint reset
-    sqlx::query("PRAGMA journal_size_limit = 67108864;")
-        .execute(pool)
-        .await?;
-    // ~20 MiB page cache (negative = KiB)
-    sqlx::query("PRAGMA cache_size = -20000;")
-        .execute(pool)
-        .await?;
-    sqlx::query("PRAGMA auto_vacuum = INCREMENTAL;")
-        .execute(pool)
-        .await?;
-    sqlx::query("PRAGMA wal_autocheckpoint = 1000;")
-        .execute(pool)
-        .await?;
+    if auto_vacuum != 2 {
+        tracing::warn!(
+            db = name,
+            auto_vacuum,
+            "auto_vacuum is not INCREMENTAL on this existing file — deleted space is reused but the file never shrinks; run `VACUUM` once while the server is stopped to switch"
+        );
+    }
 
     let check: String = sqlx::query_scalar("PRAGMA quick_check;")
         .fetch_one(pool)

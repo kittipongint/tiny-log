@@ -4,6 +4,7 @@ use crate::db;
 use crate::error::{AppError, AppResult};
 use crate::models::settings::{ChangePasswordRequest, UpdateSettings};
 use crate::retention;
+use crate::api::json::JsonBody;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::Json;
@@ -26,7 +27,7 @@ pub async fn get_settings(
 pub async fn update_settings(
     State(state): State<AppState>,
     _user: AuthUser,
-    Json(body): Json<UpdateSettings>,
+    JsonBody(body): JsonBody<UpdateSettings>,
 ) -> AppResult<Json<Value>> {
     let mut settings = db::settings::get_settings(&state.system_db).await?;
 
@@ -85,7 +86,7 @@ pub async fn run_retention(
 pub async fn change_password(
     State(state): State<AppState>,
     user: AuthUser,
-    Json(body): Json<ChangePasswordRequest>,
+    JsonBody(body): JsonBody<ChangePasswordRequest>,
 ) -> AppResult<Json<Value>> {
     let admin = user
         .admin

@@ -2,6 +2,7 @@ use crate::auth::{clear_session_cookie, password, session_cookie, AuthUser};
 use crate::db;
 use crate::error::{AppError, AppResult};
 use crate::models::settings::SetupRequest;
+use crate::api::json::JsonBody;
 use crate::state::AppState;
 use axum::extract::ConnectInfo;
 use axum::extract::State;
@@ -24,7 +25,7 @@ pub async fn login(
     jar: CookieJar,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    Json(body): Json<LoginRequest>,
+    JsonBody(body): JsonBody<LoginRequest>,
 ) -> AppResult<(CookieJar, Json<Value>)> {
     let ip = client_ip(&headers, addr);
 
@@ -73,7 +74,7 @@ pub async fn setup(
     jar: CookieJar,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    Json(body): Json<SetupRequest>,
+    JsonBody(body): JsonBody<SetupRequest>,
 ) -> AppResult<(CookieJar, Json<Value>)> {
     let ip = client_ip(&headers, addr);
     {

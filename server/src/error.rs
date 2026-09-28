@@ -22,8 +22,20 @@ pub enum AppError {
     #[error("too many requests")]
     TooManyRequests,
 
+    /// Tells batching clients how far to split: `max_batch` entries, `max_body_bytes` per request.
     #[error("payload too large")]
-    PayloadTooLarge,
+    PayloadTooLarge {
+        max_batch: usize,
+        max_body_bytes: usize,
+    },
+
+    /// Some batch entries failed validation; nothing was stored.
+    #[error("invalid entries")]
+    Rejected(Vec<(usize, String)>),
+
+    /// A body the JSON extractor refused (415 / 422 / 400) — keeps axum's status, JSON body.
+    #[error("{1}")]
+    Status(StatusCode, String),
 
     #[error("conflict: {0}")]
     Conflict(String),
@@ -58,9 +70,33 @@ impl IntoResponse for AppError {
             AppError::TooManyRequests => {
                 (StatusCode::TOO_MANY_REQUESTS, "too many requests".into())
             }
-            AppError::PayloadTooLarge => {
-                (StatusCode::PAYLOAD_TOO_LARGE, "payload too large".into())
+            AppError::PayloadTooLarge {
+                max_batch,
+                max_body_bytes,
+            } => {
+                return (
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Json(json!({
+                        "error": "payload too large",
+                        "max_batch": max_batch,
+                        "max_body_bytes": max_body_bytes,
+                    })),
+                )
+                    .into_response();
             }
+            AppError::Rejected(list) => {
+                let rejected: Vec<_> = list
+                    .iter()
+                    .map(|(index, error)| json!({ "index": index, "error": error }))
+                    .collect();
+                let first = list.first().map(|(_, e)| e.clone()).unwrap_or_default();
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": first, "rejected": rejected })),
+                )
+                    .into_response();
+            }
+            AppError::Status(status, msg) => (*status, msg.clone()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
             AppError::Sqlx(err) => {
                 tracing::error!(error = %err, "database_error");

@@ -50,7 +50,7 @@
           "timestamp": {
             "type": "string",
             "example": "2026-09-16T15:20:31.123Z",
-            "description": "RFC3339 or unix ms; omitted = server UTC now"
+            "description": "RFC3339, unix ms, or unix seconds (numbers below 1e11 are seconds; fractions ok). Omitted = server UTC now. Before 1970 or more than 24h ahead = server UTC now"
           },
           "source": { "type": "string", "example": "server" },
           "meta": {
@@ -156,6 +156,38 @@
         "type": "object",
         "properties": {
           "error": { "type": "string" }
+        }
+      },
+      "PayloadTooLarge": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string", "example": "payload too large" },
+          "max_batch": {
+            "type": "integer",
+            "example": 500,
+            "description": "Most entries per request (services, for /metrics/batch)"
+          },
+          "max_body_bytes": {
+            "type": "integer",
+            "example": 1048576,
+            "description": "Request body cap (TINY_LOG_MAX_BODY_MB)"
+          }
+        }
+      },
+      "BatchRejected": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string", "example": "invalid level: loud" },
+          "rejected": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": { "type": "integer", "example": 1 },
+                "error": { "type": "string", "example": "invalid level: loud" }
+              }
+            }
+          }
         }
       }
     }
@@ -266,8 +298,14 @@
         },
         "responses": {
           "200": { "description": "Inserted" },
-          "400": { "description": "Bad request" },
-          "401": { "description": "Unauthorized" }
+          "400": {
+            "description": "Malformed JSON or invalid entry",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "description": "Unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "413": { "description": "Too large — split and resend; body gives the limits", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PayloadTooLarge" } } } },
+          "415": { "description": "Content-Type is not application/json", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "JSON does not match the schema (e.g. missing field)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
       },
       "get": {
@@ -309,6 +347,7 @@
       "post": {
         "tags": ["logs"],
         "summary": "Write a batch of logs",
+        "description": "All or nothing: one invalid entry rejects the whole batch with 400 and `rejected` lists every bad index — drop those and resend the rest. 413 = too many entries or bytes; its body gives `max_batch` and `max_body_bytes`. Every error body is JSON.",
         "security": [{ "ApiKey": [] }],
         "requestBody": {
           "required": true,
@@ -334,7 +373,14 @@
         },
         "responses": {
           "200": { "description": "All inserted" },
-          "413": { "description": "Too large" }
+          "400": {
+            "description": "Malformed JSON, or invalid entries (nothing stored)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchRejected" } } }
+          },
+          "401": { "description": "Unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "413": { "description": "Too large — split and resend; body gives the limits", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PayloadTooLarge" } } } },
+          "415": { "description": "Content-Type is not application/json", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "JSON does not match the schema (e.g. missing field)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
       }
     },
@@ -379,7 +425,14 @@
         },
         "responses": {
           "200": { "description": "Inserted" },
-          "401": { "description": "Unauthorized" }
+          "400": {
+            "description": "Malformed JSON or invalid entry",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "description": "Unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "413": { "description": "Too large — split and resend; body gives the limits", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PayloadTooLarge" } } } },
+          "415": { "description": "Content-Type is not application/json", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "JSON does not match the schema (e.g. missing field)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
       }
     },
@@ -459,9 +512,14 @@
         },
         "responses": {
           "200": { "description": "Stored" },
-          "400": { "description": "Bad request" },
-          "401": { "description": "Unauthorized" },
-          "413": { "description": "Too many services" }
+          "400": {
+            "description": "Malformed JSON or invalid entry",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "description": "Unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "413": { "description": "More than 200 services, or body too large", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PayloadTooLarge" } } } },
+          "415": { "description": "Content-Type is not application/json", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "JSON does not match the schema (e.g. missing field)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
       }
     },

@@ -2,10 +2,13 @@ pub mod admin;
 pub mod auth;
 pub mod client_logs;
 pub mod health;
+pub mod json;
 pub mod logs;
 pub mod metrics;
 pub mod stream;
 
+#[cfg(test)]
+mod ingest_tests;
 #[cfg(test)]
 mod setup_tests;
 

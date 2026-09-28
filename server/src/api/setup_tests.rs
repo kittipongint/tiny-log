@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use tower::ServiceExt;
 
-fn test_config(mode: AuthMode, setup_token: Option<&str>) -> Config {
+pub(super) fn test_config(mode: AuthMode, setup_token: Option<&str>) -> Config {
     let dir: PathBuf = std::env::temp_dir().join(format!(
         "tiny-log-test-{}",
         crate::auth::session::generate_session_id()
@@ -37,7 +37,7 @@ fn test_config(mode: AuthMode, setup_token: Option<&str>) -> Config {
     }
 }
 
-async fn app(config: Config) -> (Router, AppState) {
+pub(super) async fn app(config: Config) -> (Router, AppState) {
     let state = AppState::new(config).await.unwrap();
     state.migrate().await.unwrap();
     state.prepare_setup_token().await.unwrap();
@@ -47,7 +47,7 @@ async fn app(config: Config) -> (Router, AppState) {
     (router, state)
 }
 
-async fn call(router: &Router, req: Request<Body>) -> (StatusCode, Option<String>, Value) {
+pub(super) async fn call(router: &Router, req: Request<Body>) -> (StatusCode, Option<String>, Value) {
     let res = router.clone().oneshot(req).await.unwrap();
     let status = res.status();
     let cookie = res

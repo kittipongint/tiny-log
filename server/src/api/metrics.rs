@@ -3,6 +3,7 @@ use crate::auth::AuthUser;
 use crate::db;
 use crate::error::{AppError, AppResult};
 use crate::models::metrics::{CapacityQuery, MetricsBatchRequest, MetricsHistoryQuery};
+use crate::api::json::JsonBody;
 use crate::state::AppState;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
@@ -12,7 +13,7 @@ use serde_json::{json, Value};
 pub async fn ingest_batch(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(body): Json<MetricsBatchRequest>,
+    JsonBody(body): JsonBody<MetricsBatchRequest>,
 ) -> AppResult<Json<Value>> {
     require_api_key(&state, &headers)?;
 
@@ -24,6 +25,13 @@ pub async fn ingest_batch(
         return Err(AppError::bad_request(
             "system or services is required",
         ));
+    }
+
+    if body.services.len() > db::metrics::MAX_SERVICES {
+        return Err(AppError::PayloadTooLarge {
+            max_batch: db::metrics::MAX_SERVICES,
+            max_body_bytes: state.config.max_body_bytes(),
+        });
     }
 
     let timestamp_ms = db::metrics::parse_batch_timestamp(&body)?;

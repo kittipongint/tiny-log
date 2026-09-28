@@ -7,6 +7,9 @@ use crate::models::metrics::{
 };
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
+/// Service checks accepted per metrics batch.
+pub const MAX_SERVICES: usize = 200;
+
 pub async fn insert_batch(
     pool: &SqlitePool,
     host: &str,
@@ -14,8 +17,8 @@ pub async fn insert_batch(
     system: Option<&HostSampleInput>,
     services: &[ServiceCheckInput],
 ) -> AppResult<()> {
-    if services.len() > 200 {
-        return Err(AppError::PayloadTooLarge);
+    if services.len() > MAX_SERVICES {
+        return Err(AppError::bad_request("too many services"));
     }
 
     let mut conn = pool.acquire().await?;
@@ -395,16 +398,9 @@ pub async fn host_capacity(pool: &SqlitePool, host: &str) -> AppResult<HostCapac
 }
 
 pub async fn delete_older_than(pool: &SqlitePool, cutoff_ms: i64) -> AppResult<u64> {
-    let hosts = sqlx::query("DELETE FROM host_samples WHERE timestamp_ms < ?")
-        .bind(cutoff_ms)
-        .execute(pool)
-        .await?
-        .rows_affected();
-    let services = sqlx::query("DELETE FROM service_checks WHERE timestamp_ms < ?")
-        .bind(cutoff_ms)
-        .execute(pool)
-        .await?
-        .rows_affected();
+    use crate::db::logs::{delete_in_chunks, DELETE_CHUNK};
+    let hosts = delete_in_chunks(pool, "host_samples", cutoff_ms, DELETE_CHUNK).await?;
+    let services = delete_in_chunks(pool, "service_checks", cutoff_ms, DELETE_CHUNK).await?;
     Ok(hosts + services)
 }
 

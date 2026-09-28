@@ -335,12 +335,22 @@ Database file:
 SQLite configuration:
 
 ```sql
+PRAGMA auto_vacuum = INCREMENTAL;   -- before journal_mode; new files only
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
-PRAGMA busy_timeout = 5000;
+PRAGMA busy_timeout = 10000;
 PRAGMA foreign_keys = ON;
-PRAGMA auto_vacuum = INCREMENTAL;
+PRAGMA temp_store = MEMORY;
+PRAGMA journal_size_limit = 67108864;
+PRAGMA cache_size = -20000;
+PRAGMA wal_autocheckpoint = 1000;
 ```
+
+Set every PRAGMA on `SqliteConnectOptions` so each pooled connection gets it.
+Running `PRAGMA …` once against the pool only reaches one connection.
+
+`auto_vacuum` cannot change on an existing file without a full `VACUUM`.
+On startup the server warns when a file is not INCREMENTAL.
 
 Use SQLx SQLite connection pool.
 
@@ -465,11 +475,22 @@ Example:
 }
 ```
 
+Accepted timestamp forms:
+
+```text
+RFC 3339                     2026-09-15T15:20:31.123Z
+unix milliseconds            1789485631123
+unix seconds (< 1e11)        1789485631 or 1789485631.123
+```
+
 If timestamp is omitted:
 
 ```text
 server current UTC time
 ```
+
+If timestamp is before 1970 or more than 24 hours in the future, it is replaced with
+server current UTC time.
 
 ---
 
@@ -691,6 +712,20 @@ or:
 all rolled back
 ```
 
+If any entry fails validation, nothing is stored and the response lists every bad index:
+
+```json
+{
+  "error": "invalid level: loud",
+  "rejected": [
+    { "index": 1, "error": "invalid level: loud" },
+    { "index": 3, "error": "app is required" }
+  ]
+}
+```
+
+A client drops the rejected entries and resends the rest.
+
 ---
 
 # 13. Browser Client Log API
@@ -858,6 +893,8 @@ broadcast channel
 ```
 
 Broadcast only after successful DB commit.
+
+When no browser is connected (`receiver_count() == 0`), skip building broadcast entries.
 
 SQLite remains the source of truth.
 
@@ -1330,12 +1367,17 @@ Background Tokio task:
 every 1 hour
 ```
 
-Run:
+Run in chunks of 5,000 rows until a chunk comes back short:
 
 ```sql
 DELETE FROM logs
-WHERE timestamp_ms < ?;
+WHERE rowid IN (
+    SELECT rowid FROM logs WHERE timestamp_ms < ? LIMIT 5000
+);
 ```
+
+Each chunk is its own short write transaction, so ingest waiting on `busy_timeout`
+gets the lock between chunks. One big DELETE can hold the lock past `busy_timeout`.
 
 Then:
 
@@ -1397,6 +1439,23 @@ If exceeded:
 ```text
 413 Payload Too Large
 ```
+
+Response body:
+
+```json
+{
+  "error": "payload too large",
+  "max_batch": 500,
+  "max_body_bytes": 1048576
+}
+```
+
+A batching client splits and resends. One entry at its maximum size (64 KB message plus
+128 KB metadata) fits within the body limit, so splitting always ends in a batch that fits.
+
+Every error response is JSON `{"error": "..."}`, including a malformed body (400),
+a missing `Content-Type: application/json` (415) and a body that does not match the
+schema (422).
 
 ---
 
