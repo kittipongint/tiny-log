@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod auth;
 pub mod client_logs;
+pub mod export;
 pub mod health;
 pub mod json;
 pub mod logs;
@@ -11,6 +12,8 @@ pub mod stream;
 mod ingest_tests;
 #[cfg(test)]
 mod setup_tests;
+#[cfg(test)]
+mod export_tests;
 
 use crate::state::AppState;
 use axum::routing::{get, post};
@@ -28,6 +31,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/logs", post(logs::create_log).get(logs::list_logs))
         .route("/api/v1/logs/batch", post(logs::create_batch))
         .route("/api/v1/logs/stream", get(stream::stream_logs))
+        .route("/api/v1/logs/export", get(export::export_logs))
         .route("/api/v1/logs/{id}", get(logs::get_log))
         .route("/api/v1/client/logs", post(client_logs::create_client_log))
         .route("/api/v1/metrics/batch", post(metrics::ingest_batch))

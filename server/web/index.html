@@ -47,7 +47,24 @@
       </span>
     </label>
     <button id="live-btn" type="button" class="live-btn" aria-pressed="false">Live</button>
+    <label class="export-label">
+      Export (current filters)
+      <span class="search-row">
+        <select id="export-format" aria-label="Export format">
+          <option value="csv">CSV</option>
+          <option value="ndjson">NDJSON</option>
+        </select>
+        <button id="export-btn" type="button">Export</button>
+      </span>
+    </label>
   </section>
+
+  <div id="select-bar" class="select-bar" hidden>
+    <span id="select-count"></span>
+    <button id="copy-text-btn" type="button">Copy text</button>
+    <button id="copy-json-btn" type="button">Copy JSON</button>
+    <button id="select-clear-btn" type="button" class="linkish">Clear</button>
+  </div>
 
   <div id="new-logs-banner" class="new-logs" hidden>
     <button type="button" id="new-logs-btn">0 new logs</button>
@@ -57,6 +74,7 @@
     <table class="log-table">
       <thead>
         <tr>
+          <th class="pick"><input type="checkbox" id="pick-all" aria-label="Select all shown" /></th>
           <th>Time</th>
           <th>App</th>
           <th>Level</th>
@@ -73,6 +91,11 @@
         <h2>Log detail</h2>
         <button value="close" class="linkish">Close</button>
       </header>
+      <div class="copy-row">
+        <button type="button" class="linkish" data-copy="message">Copy message</button>
+        <button type="button" class="linkish" data-copy="meta">Copy meta</button>
+        <button type="button" class="linkish" data-copy="json">Copy JSON</button>
+      </div>
       <dl>
         <dt>Timestamp</dt><dd id="d-timestamp"></dd>
         <dt>App</dt><dd id="d-app"></dd>
@@ -83,6 +106,8 @@
       </dl>
     </form>
   </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="/app.js"></script>
 </body>

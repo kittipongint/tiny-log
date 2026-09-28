@@ -360,7 +360,7 @@ label {
 }
 
 .log-table-wrap {
-  padding: 0.5rem 1.25rem 2rem;
+  padding: 0.5rem 1.25rem 5rem;
   overflow: auto;
 }
 
@@ -392,6 +392,63 @@ label {
 .log-table tbody tr {
   cursor: pointer;
 }
+.log-table tbody tr.picked {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.log-table .pick {
+  width: 1.8rem;
+  cursor: default;
+}
+.log-table .pick input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.export-label { flex: 0 0 auto; }
+.export-label select { width: auto; }
+
+/* Floats over the table so ticking rows never shifts them under the pointer. */
+.select-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: calc(100vw - 2rem);
+}
+.select-bar[hidden] { display: none; }
+.select-bar #select-count { color: var(--muted); font-size: 0.9rem; white-space: nowrap; }
+
+.copy-row {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.toast {
+  position: fixed;
+  bottom: 4.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  border-radius: 6px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.9rem;
+  z-index: 10;
+}
+.toast.bad { border-color: var(--danger); color: var(--danger); }
 .log-table tbody tr:hover {
   background: var(--bg-row);
 }
@@ -476,7 +533,9 @@ dialog::backdrop {
 
 @media (max-width: 720px) {
   .filters { flex-direction: column; align-items: stretch; }
-  .log-table th:nth-child(2),
-  .log-table td:nth-child(2) { display: none; }
+  .search-label { flex: none; }
+  .log-table th:nth-child(3),
+  .log-table td:nth-child(3) { display: none; }
+  .export-label select { width: 100%; }
   .detail dl { grid-template-columns: 1fr; }
 }

@@ -106,40 +106,7 @@ pub async fn query_logs(pool: &SqlitePool, query: &LogQuery) -> AppResult<Vec<Lo
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
         "SELECT id, timestamp_ms, app, level, source, message, meta_json FROM logs WHERE 1=1",
     );
-
-    if let Some(app) = query.app.as_ref().filter(|s| !s.is_empty()) {
-        qb.push(" AND app = ");
-        qb.push_bind(app);
-    }
-
-    if let Some(level) = query.level.as_ref().filter(|s| !s.is_empty()) {
-        let level = level.to_lowercase();
-        qb.push(" AND level = ");
-        qb.push_bind(level);
-    }
-
-    if let Some(source) = query.source.as_ref().filter(|s| !s.is_empty()) {
-        qb.push(" AND source = ");
-        qb.push_bind(source);
-    }
-
-    if let Some(search) = query.search.as_ref().filter(|s| !s.is_empty()) {
-        let pattern = format!("%{search}%");
-        qb.push(" AND message LIKE ");
-        qb.push_bind(pattern);
-    }
-
-    if let Some(from) = &query.from {
-        let ms = parse_bound(from)?;
-        qb.push(" AND timestamp_ms >= ");
-        qb.push_bind(ms);
-    }
-
-    if let Some(to) = &query.to {
-        let ms = parse_bound(to)?;
-        qb.push(" AND timestamp_ms <= ");
-        qb.push_bind(ms);
-    }
+    push_filters(&mut qb, query)?;
 
     qb.push(" ORDER BY timestamp_ms DESC, id DESC LIMIT ");
     qb.push_bind(limit);
@@ -152,6 +119,73 @@ pub async fn query_logs(pool: &SqlitePool, query: &LogQuery) -> AppResult<Vec<Lo
         out.push(row.into_entry()?);
     }
     Ok(out)
+}
+
+/// One export page, newest first, strictly older than `before` = (timestamp_ms, id).
+/// Keyset paging: every page costs the same however deep the export goes (OFFSET doesn't).
+pub async fn export_page(
+    pool: &SqlitePool,
+    query: &LogQuery,
+    before: Option<(i64, i64)>,
+    limit: i64,
+) -> AppResult<Vec<(i64, LogEntry)>> {
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT id, timestamp_ms, app, level, source, message, meta_json FROM logs WHERE 1=1",
+    );
+    push_filters(&mut qb, query)?;
+    if let Some((ts, id)) = before {
+        qb.push(" AND (timestamp_ms < ");
+        qb.push_bind(ts);
+        qb.push(" OR (timestamp_ms = ");
+        qb.push_bind(ts);
+        qb.push(" AND id < ");
+        qb.push_bind(id);
+        qb.push("))");
+    }
+    qb.push(" ORDER BY timestamp_ms DESC, id DESC LIMIT ");
+    qb.push_bind(limit);
+
+    let rows = qb.build_query_as::<LogRow>().fetch_all(pool).await?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let ts = row.timestamp_ms;
+        out.push((ts, row.into_entry()?));
+    }
+    Ok(out)
+}
+
+/// WHERE clauses shared by the log list and the export, so both show the same rows.
+fn push_filters(qb: &mut QueryBuilder<Sqlite>, query: &LogQuery) -> AppResult<()> {
+    if let Some(app) = query.app.as_ref().filter(|s| !s.is_empty()) {
+        qb.push(" AND app = ");
+        qb.push_bind(app.clone());
+    }
+
+    if let Some(level) = query.level.as_ref().filter(|s| !s.is_empty()) {
+        qb.push(" AND level = ");
+        qb.push_bind(level.to_lowercase());
+    }
+
+    if let Some(source) = query.source.as_ref().filter(|s| !s.is_empty()) {
+        qb.push(" AND source = ");
+        qb.push_bind(source.clone());
+    }
+
+    if let Some(search) = query.search.as_ref().filter(|s| !s.is_empty()) {
+        qb.push(" AND message LIKE ");
+        qb.push_bind(format!("%{search}%"));
+    }
+
+    if let Some(from) = &query.from {
+        qb.push(" AND timestamp_ms >= ");
+        qb.push_bind(parse_bound(from)?);
+    }
+
+    if let Some(to) = &query.to {
+        qb.push(" AND timestamp_ms <= ");
+        qb.push_bind(parse_bound(to)?);
+    }
+    Ok(())
 }
 
 pub async fn list_apps(pool: &SqlitePool) -> AppResult<Vec<String>> {

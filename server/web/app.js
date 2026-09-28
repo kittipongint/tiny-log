@@ -9,6 +9,14 @@ const navUser = document.getElementById("nav-user");
 const banner = document.getElementById("new-logs-banner");
 const newLogsBtn = document.getElementById("new-logs-btn");
 const dialog = document.getElementById("detail-dialog");
+const pickAll = document.getElementById("pick-all");
+const selectBar = document.getElementById("select-bar");
+const selectCount = document.getElementById("select-count");
+const toastEl = document.getElementById("toast");
+
+// Picked rows by id, in the order they were picked. Cleared when the list reloads.
+const picked = new Map();
+let detailLog = null;
 
 let eventSource = null;
 let pendingNew = [];
@@ -47,6 +55,16 @@ function createRow(log) {
   const tr = document.createElement("tr");
   tr.dataset.id = String(log.id);
 
+  const tdPick = document.createElement("td");
+  tdPick.className = "pick";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.setAttribute("aria-label", "Select row");
+  box.checked = picked.has(log.id);
+  tr.classList.toggle("picked", box.checked);
+  box.addEventListener("change", () => setPicked(log, tr, box.checked));
+  tdPick.appendChild(box);
+
   const tdTime = document.createElement("td");
   tdTime.textContent = formatTime(log.timestamp);
 
@@ -62,15 +80,120 @@ function createRow(log) {
   const tdMsg = document.createElement("td");
   tdMsg.textContent = log.message || "";
 
-  tr.append(tdTime, tdApp, tdLevel, tdMsg);
-  tr.addEventListener("click", () => showDetail(log));
+  tr.append(tdPick, tdTime, tdApp, tdLevel, tdMsg);
+  tr.addEventListener("click", (e) => {
+    if (e.target.closest(".pick")) return;
+    // Dragging over text to copy it must not pop the dialog open.
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+    showDetail(log);
+  });
   return tr;
 }
+
+function setPicked(log, tr, on) {
+  if (on) picked.set(log.id, log);
+  else picked.delete(log.id);
+  tr.classList.toggle("picked", on);
+  updateSelectBar();
+}
+
+function updateSelectBar() {
+  const n = picked.size;
+  selectBar.hidden = n === 0;
+  selectCount.textContent = `${n} selected`;
+  const boxes = rowsEl.querySelectorAll(".pick input");
+  const checked = rowsEl.querySelectorAll(".pick input:checked").length;
+  pickAll.checked = boxes.length > 0 && checked === boxes.length;
+  pickAll.indeterminate = checked > 0 && checked < boxes.length;
+}
+
+function clearPicked() {
+  picked.clear();
+  for (const tr of rowsEl.querySelectorAll("tr.picked")) {
+    tr.classList.remove("picked");
+    tr.querySelector(".pick input").checked = false;
+  }
+  updateSelectBar();
+}
+
+// One line per log, oldest first, ready to paste into a chat or a ticket.
+function logAsText(log) {
+  const src = log.source ? ` (${log.source})` : "";
+  const meta = log.meta ? ` ${JSON.stringify(log.meta)}` : "";
+  return `${log.timestamp} ${String(log.level || "").toUpperCase()} ${log.app}${src}: ${log.message}${meta}`;
+}
+
+function pickedLogs() {
+  return [...picked.values()].sort((a, b) =>
+    a.timestamp === b.timestamp ? a.id - b.id : a.timestamp < b.timestamp ? -1 : 1
+  );
+}
+
+let toastTimer = null;
+function toast(msg, bad = false) {
+  toastEl.textContent = msg;
+  toastEl.classList.toggle("bad", bad);
+  toastEl.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (toastEl.hidden = true), 1800);
+}
+
+// navigator.clipboard needs HTTPS or localhost; plain-HTTP deployments fall back to execCommand.
+async function copyText(text, label) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      (dialog.open ? dialog : document.body).appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      if (!ok) throw new Error("copy refused");
+    }
+    toast(`Copied ${label}`);
+  } catch {
+    toast("Copy failed — select the text and press Ctrl/Cmd+C", true);
+  }
+}
+
+pickAll.addEventListener("change", () => {
+  for (const tr of rowsEl.querySelectorAll("tr")) {
+    const box = tr.querySelector(".pick input");
+    if (!box || box.checked === pickAll.checked) continue;
+    box.checked = pickAll.checked;
+    box.dispatchEvent(new Event("change"));
+  }
+});
+
+document.getElementById("copy-text-btn").addEventListener("click", () => {
+  const logs = pickedLogs();
+  copyText(logs.map(logAsText).join("\n"), `${logs.length} line${logs.length === 1 ? "" : "s"}`);
+});
+document.getElementById("copy-json-btn").addEventListener("click", () => {
+  const logs = pickedLogs();
+  copyText(JSON.stringify(logs, null, 2), `${logs.length} as JSON`);
+});
+document.getElementById("select-clear-btn").addEventListener("click", clearPicked);
+
+dialog.addEventListener("click", (e) => {
+  const kind = e.target.closest("[data-copy]")?.dataset.copy;
+  if (!kind || !detailLog) return;
+  if (kind === "message") copyText(detailLog.message || "", "message");
+  else if (kind === "meta") copyText(detailLog.meta ? JSON.stringify(detailLog.meta, null, 2) : "", "meta");
+  else copyText(JSON.stringify(detailLog, null, 2), "JSON");
+});
 
 function prependLog(log) {
   const existing = rowsEl.querySelector(`[data-id="${log.id}"]`);
   if (existing) return;
   rowsEl.prepend(createRow(log));
+  if (picked.size) updateSelectBar();
 }
 
 function appendLogs(logs) {
@@ -82,6 +205,7 @@ function appendLogs(logs) {
 }
 
 function showDetail(log) {
+  detailLog = log;
   document.getElementById("d-timestamp").textContent = log.timestamp || "";
   document.getElementById("d-app").textContent = log.app || "";
   document.getElementById("d-level").textContent = log.level || "";
@@ -132,6 +256,24 @@ function queryString() {
   return params.toString();
 }
 
+// Export takes the list filters but no limit: the server streams every matching row.
+function exportUrl() {
+  const params = new URLSearchParams(queryString());
+  params.delete("limit");
+  params.set("format", document.getElementById("export-format").value);
+  return `/api/v1/logs/export?${params}`;
+}
+
+document.getElementById("export-btn").addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = exportUrl();
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  toast("Export started");
+});
+
 function matchesFilters(log) {
   if (appFilter.value && log.app !== appFilter.value) return false;
   if (levelFilter.value && String(log.level).toLowerCase() !== levelFilter.value) return false;
@@ -145,7 +287,9 @@ async function loadLogs() {
   if (!res.ok) throw new Error("failed to load logs");
   const data = await res.json();
   rowsEl.replaceChildren();
+  picked.clear();
   appendLogs(data.logs || []);
+  updateSelectBar();
   pendingNew = [];
   updateBanner();
 }

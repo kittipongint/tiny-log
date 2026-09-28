@@ -384,6 +384,35 @@
         }
       }
     },
+    "/api/v1/logs/export": {
+      "get": {
+        "tags": ["logs"],
+        "summary": "Export every log matching the list filters (NDJSON or CSV download)",
+        "description": "Same filters as GET /api/v1/logs, no page limit. Streams newest first, 1,000 rows per page (keyset), so memory stays flat. CSV starts with a UTF-8 BOM (Excel shows Thai correctly), quotes per RFC 4180 and prefixes cells starting with = + - @ with ' so a spreadsheet won't run them. A bad parameter is a JSON 400 before any bytes are sent; a DB error mid-stream aborts the download instead of ending it short.",
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["ndjson", "csv"], "default": "ndjson" } },
+          { "name": "app", "in": "query", "schema": { "type": "string" } },
+          { "name": "level", "in": "query", "schema": { "type": "string", "enum": ["debug", "info", "warn", "error", "fatal"] } },
+          { "name": "source", "in": "query", "schema": { "type": "string" } },
+          { "name": "search", "in": "query", "description": "message contains", "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "description": "unix ms or RFC 3339", "schema": { "type": "string" } },
+          { "name": "to", "in": "query", "description": "unix ms or RFC 3339", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "description": "max rows (default and cap 1,000,000)", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment tiny-log-<app|all>-<yyyyMMdd-HHmmss>.<ext>. NDJSON: one LogEntry per line. CSV columns: id,timestamp,app,level,source,message,meta (meta as JSON).",
+            "content": {
+              "application/x-ndjson": { "schema": { "type": "string" } },
+              "text/csv": { "schema": { "type": "string" } }
+            }
+          },
+          "400": { "description": "Unknown format or bad time bound" },
+          "401": { "description": "No session (login mode)" }
+        }
+      }
+    },
     "/api/v1/logs/{id}": {
       "get": {
         "tags": ["logs"],

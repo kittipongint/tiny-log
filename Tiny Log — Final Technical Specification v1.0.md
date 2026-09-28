@@ -829,6 +829,31 @@ id DESC
 
 ---
 
+## Export
+
+```http
+GET /api/v1/logs/export?format=csv&app=wordyguru&level=error&search=timeout&from=...&to=...
+```
+
+Requires an admin session (anonymous mode: open, like every read). Takes the
+same filters as `GET /api/v1/logs`, but no page limit: every matching row, newest
+first, up to `limit` (default and cap 1,000,000).
+
+- `format=ndjson` (default): one `LogEntry` JSON per line, `meta` as an object.
+- `format=csv`: UTF-8 BOM, header `id,timestamp,app,level,source,message,meta`,
+  RFC 4180 quoting, CRLF rows. `meta` is its JSON text. A cell that starts with
+  `= + - @` (or tab/CR) gets a leading `'` so a spreadsheet shows it instead of
+  running it.
+
+Download name: `tiny-log-<app|all>-<yyyyMMdd-HHmmss>.<ndjson|csv>`.
+
+Streams 1,000 rows at a time with keyset paging on `(timestamp_ms, id)`, so the
+server holds one page, never the file. The first page is read before the 200
+goes out, so a bad `format`/`from`/`to` is a JSON 400. A database error later
+aborts the download instead of ending it short.
+
+---
+
 # 15. Log Search
 
 Initial search:
@@ -1165,13 +1190,14 @@ No forgot-password flow.
 │ Level    [All ▼]                                    │
 │ Search   [________________________] [Search]        │
 │                                                     │
-│ [Live ●]                                            │
+│ [Live ●]            Export [CSV ▼] [Export]         │
 ├─────────────────────────────────────────────────────┤
-│ Time       App         Level     Message             │
-│ 22:41:03   wordyguru   ERROR     MySQL timeout       │
-│ 22:41:02   nginx       INFO      GET /article/foo    │
-│ 22:40:59   worker      WARN      retry job           │
+│ ☐ Time       App         Level     Message           │
+│ ☑ 22:41:03   wordyguru   ERROR     MySQL timeout     │
+│ ☐ 22:41:02   nginx       INFO      GET /article/foo  │
+│ ☑ 22:40:59   worker      WARN      retry job         │
 └─────────────────────────────────────────────────────┘
+        ┌ 2 selected [Copy text] [Copy JSON] Clear ┐
 ```
 
 Click row:
@@ -1183,7 +1209,22 @@ level
 source
 message
 metadata
+[Copy message] [Copy meta] [Copy JSON]
 ```
+
+Copy and export:
+
+- Dragging over text in the table selects it for copying; the detail dialog
+  opens only on a click that selected nothing.
+- Row checkboxes (header box = all rows shown) open a floating bar.
+  **Copy text** puts one line per log, oldest first:
+  `2026-09-28T03:21:10.138Z ERROR wordyguru (server): message {"meta":"json"}`.
+  **Copy JSON** puts the same logs as a JSON array. The selection clears when
+  the list reloads.
+- The clipboard API needs HTTPS or localhost; on plain HTTP the page falls back
+  to `document.execCommand("copy")`. A toast confirms or says to copy by hand.
+- **Export** downloads `GET /api/v1/logs/export` with the current App / Level /
+  Search filters and the chosen format (§14 Export).
 
 ---
 
@@ -1577,6 +1618,7 @@ POST /api/v1/logs/batch
 POST /api/v1/client/logs
 
 GET  /api/v1/logs
+GET  /api/v1/logs/export
 GET  /api/v1/logs/:id
 GET  /api/v1/logs/stream
 
@@ -2129,6 +2171,8 @@ tinyLog(
 - Admin can filter by level.
 - Admin can inspect metadata.
 - Live stream works.
+- Export returns every matching row once, newest first, as NDJSON or CSV (BOM, quoted, formula-guarded).
+- Selecting text in the table does not open the detail dialog; picked rows copy as text or JSON.
 
 ## Retention
 
