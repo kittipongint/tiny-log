@@ -25,6 +25,8 @@ pub struct Config {
     pub metrics_database: PathBuf,
     pub api_key: Option<String>,
     pub client_token: Option<String>,
+    /// One-time token for POST /api/auth/setup. Generated and logged at start when unset.
+    pub setup_token: Option<String>,
     pub auth_mode: AuthMode,
     pub retention_days: i64,
     pub session_days: i64,
@@ -49,6 +51,7 @@ impl Config {
             metrics_database,
             api_key: env_nonempty("TINY_LOG_API_KEY"),
             client_token: env_nonempty("TINY_LOG_CLIENT_TOKEN"),
+            setup_token: env_nonempty("TINY_LOG_SETUP_TOKEN"),
             auth_mode: resolve_auth_mode(),
             retention_days,
             session_days,

@@ -19,6 +19,10 @@ pub struct AppState {
     pub broadcaster: LogBroadcast,
     pub config: Arc<Config>,
     pub login_limiter: Arc<Mutex<LoginLimiter>>,
+    /// One-time token that POST /api/auth/setup must present. None once an admin exists.
+    pub setup_token: Arc<std::sync::Mutex<Option<String>>>,
+    /// Serialises setup so two callers can't both pass the "no admin yet" check.
+    pub setup_lock: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -50,7 +54,35 @@ impl AppState {
             broadcaster,
             config: Arc::new(config),
             login_limiter: Arc::new(Mutex::new(LoginLimiter::new())),
+            setup_token: Arc::new(std::sync::Mutex::new(None)),
+            setup_lock: Arc::new(Mutex::new(())),
         })
+    }
+
+    /// Arm first-run setup: while no admin exists, only a caller holding this token may
+    /// create one. Uses TINY_LOG_SETUP_TOKEN, or generates a token and logs it once.
+    pub async fn prepare_setup_token(&self) -> anyhow::Result<()> {
+        if crate::db::admin::get_admin(&self.system_db).await?.is_some() {
+            *self.setup_token.lock().unwrap() = None;
+            return Ok(());
+        }
+        let token = match &self.config.setup_token {
+            Some(t) => {
+                tracing::warn!(
+                    "setup_required — no admin yet; open /setup and enter TINY_LOG_SETUP_TOKEN, or run `tiny-log admin create`"
+                );
+                t.clone()
+            }
+            None => {
+                let t = crate::auth::session::generate_session_id();
+                tracing::warn!(
+                    "setup_required — no admin yet; open /setup#token={t} (one-time token, valid until setup completes), or run `tiny-log admin create`"
+                );
+                t
+            }
+        };
+        *self.setup_token.lock().unwrap() = Some(token);
+        Ok(())
     }
 
     pub async fn migrate(&self) -> anyhow::Result<()> {

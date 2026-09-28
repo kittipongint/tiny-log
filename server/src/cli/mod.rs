@@ -69,6 +69,7 @@ async fn serve(config: Config) -> anyhow::Result<()> {
 
     let state = AppState::new(config).await?;
     state.migrate().await?;
+    state.prepare_setup_token().await?;
 
     tracing::info!(
         logs = %logs_path,

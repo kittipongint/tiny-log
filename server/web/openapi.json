@@ -205,6 +205,37 @@
         }
       }
     },
+    "/api/auth/setup": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "First-run: create the admin (needs the one-time setup token)",
+        "description": "Only while no admin exists. The token is TINY_LOG_SETUP_TOKEN, or generated at start and printed in the server log as /setup#token=…. It is spent on success. Until setup completes, every session-protected endpoint returns 401 in login mode.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["setup_token", "username", "password", "confirm_password"],
+                "properties": {
+                  "setup_token": { "type": "string" },
+                  "username": { "type": "string", "maxLength": 64 },
+                  "password": { "type": "string", "minLength": 12 },
+                  "confirm_password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Admin created; session cookie set" },
+          "400": { "description": "Invalid username/password" },
+          "401": { "description": "Missing or wrong setup token" },
+          "409": { "description": "Admin already exists" },
+          "429": { "description": "Too many wrong tokens from this IP (5 per 5 min)" }
+        }
+      }
+    },
     "/api/auth/me": {
       "get": {
         "tags": ["auth"],

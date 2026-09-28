@@ -296,6 +296,10 @@ TINY_LOG_DATABASE=/data/logs.db
 TINY_LOG_API_KEY=
 TINY_LOG_CLIENT_TOKEN=
 
+# Optional. One-time token for web first-run setup (POST /api/auth/setup).
+# Unset: a random token is generated at start and printed in the log.
+TINY_LOG_SETUP_TOKEN=
+
 TINY_LOG_REQUIRE_AUTH=true
 
 TINY_LOG_RETENTION_DAYS=30
@@ -553,6 +557,49 @@ POST /api/auth/logout
 ```
 
 Requires authenticated session.
+
+---
+
+## First-run Setup
+
+```http
+POST /api/auth/setup
+```
+
+Only while no admin exists. Request:
+
+```json
+{
+  "setup_token": "...",
+  "username": "admin",
+  "password": "...",
+  "confirm_password": "..."
+}
+```
+
+`setup_token` is `TINY_LOG_SETUP_TOKEN`, or — when that is unset — a random
+token generated at start and printed once in the server log:
+
+```text
+setup_required — no admin yet; open /setup#token=<64 hex> (one-time token, valid until setup completes), or run `tiny-log admin create`
+```
+
+The token sits in the URL fragment, so it never reaches the server or proxy
+access logs. The setup page reads it from the fragment and fills the field.
+
+Responses:
+
+```text
+200  admin created, session cookie set, token spent
+400  username empty / over 64 chars, password under 12, mismatch
+401  missing or wrong token (counts toward the login rate limit)
+409  admin already exists
+429  5 wrong tokens from one IP in 5 minutes
+```
+
+"Setup required" is not a login. In login mode, until an admin exists every
+session-protected endpoint (log reads, stream, metrics, settings) returns 401.
+Setup calls are serialised, so two callers can never both create an admin.
 
 ---
 
@@ -892,6 +939,11 @@ Then:
 ```bash
 docker compose run --rm -it tiny-log admin create
 ```
+
+Or, from the browser: open the `/setup#token=…` link printed in the server log
+at start (or `/setup` with `TINY_LOG_SETUP_TOKEN`). See §11 First-run Setup.
+Without the token nobody can claim a fresh server, even when it listens on
+`0.0.0.0`.
 
 Interactive:
 
@@ -1359,6 +1411,7 @@ Required:
 - Secure cookies in production
 - SameSite=Lax
 - login rate limiting
+- first-run setup gated by a one-time setup token; no access before an admin exists
 - request body limits
 - batch size limits
 - admin-only log reads
@@ -1451,10 +1504,12 @@ LOGIN
 GET  /health
 
 GET  /login
+GET  /setup
 GET  /
 GET  /settings
 
 POST /api/auth/login
+POST /api/auth/setup
 POST /api/auth/logout
 GET  /api/auth/me
 
@@ -2001,6 +2056,8 @@ tinyLog(
 - Logout invalidates session.
 - Password change invalidates all sessions.
 - Only one admin record exists.
+- Before an admin exists (login mode), log/metrics/settings reads return 401.
+- Setup without the setup token, or with a wrong one, returns 401; a used token no longer works.
 
 ## Logs
 

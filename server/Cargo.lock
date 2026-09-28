@@ -1854,6 +1854,7 @@ dependencies = [
  "clap",
  "futures",
  "hex",
+ "http-body-util",
  "rand 0.9.5",
  "rpassword",
  "serde",

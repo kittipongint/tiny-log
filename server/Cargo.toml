@@ -37,3 +37,7 @@ hex = "0.4"
 futures = "0.3"
 bytes = "1"
 time = "0.3"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

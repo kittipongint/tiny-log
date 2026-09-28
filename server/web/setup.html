@@ -11,8 +11,12 @@
     <h1>Tiny Log</h1>
     <p class="muted">Create the first admin account</p>
     <form id="setup-form" autocomplete="on">
+      <label for="setup-token">Setup token</label>
+      <input id="setup-token" name="setup_token" type="password" required autocomplete="off" />
+      <p class="muted">Printed in the server log at start (<code>setup_required</code>), or the value of <code>TINY_LOG_SETUP_TOKEN</code>.</p>
+
       <label for="username">Username</label>
-      <input id="username" name="username" type="text" required autofocus />
+      <input id="username" name="username" type="text" required autofocus maxlength="64" />
 
       <label for="password">Password</label>
       <input id="password" name="password" type="password" required minlength="12" />

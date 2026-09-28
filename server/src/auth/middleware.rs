@@ -22,25 +22,22 @@ impl AuthUser {
     }
 }
 
-/// Allow UI/read access when anonymous, first-run setup, or valid session.
+/// Anonymous mode: everyone passes. Login mode: a valid session is required, and while
+/// no admin exists nobody passes (first-run setup is not a login).
 pub async fn require_admin(state: &AppState, jar: &CookieJar) -> AppResult<AuthUser> {
     let admin = db::admin::get_admin(&state.system_db).await?;
-    let setup_required = admin.is_none();
-
-    if setup_required {
-        return Ok(AuthUser {
-            admin: None,
-            session_id: String::new(),
-            setup_required: true,
-        });
-    }
 
     if state.config.is_anonymous() {
+        let setup_required = admin.is_none();
         return Ok(AuthUser {
             admin,
             session_id: String::new(),
-            setup_required: false,
+            setup_required,
         });
+    }
+
+    if admin.is_none() {
+        return Err(AppError::Unauthorized);
     }
 
     let token = jar

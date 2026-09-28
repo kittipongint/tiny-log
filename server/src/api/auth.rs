@@ -71,15 +71,42 @@ pub async fn login(
 pub async fn setup(
     State(state): State<AppState>,
     jar: CookieJar,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<SetupRequest>,
 ) -> AppResult<(CookieJar, Json<Value>)> {
+    let ip = client_ip(&headers, addr);
+    {
+        let mut limiter = state.login_limiter.lock().await;
+        if !limiter.check_allowed(&ip) {
+            return Err(AppError::TooManyRequests);
+        }
+    }
+
+    // Held until the admin row exists, so two callers can't both pass the checks below.
+    let _setup = state.setup_lock.lock().await;
+
     if db::admin::get_admin(&state.system_db).await?.is_some() {
         return Err(AppError::Conflict("admin user already exists".into()));
+    }
+
+    let expected = state.setup_token.lock().unwrap().clone();
+    let token_ok = match expected {
+        Some(t) => constant_time_eq(t.as_bytes(), body.setup_token.trim().as_bytes()),
+        None => false,
+    };
+    if !token_ok {
+        state.login_limiter.lock().await.record_failure(&ip);
+        tracing::warn!(ip = %ip, "unauthorized_request path=/api/auth/setup");
+        return Err(AppError::Unauthorized);
     }
 
     let username = body.username.trim();
     if username.is_empty() {
         return Err(AppError::bad_request("username is required"));
+    }
+    if username.chars().count() > 64 {
+        return Err(AppError::bad_request("username is too long (max 64)"));
     }
     if body.password != body.confirm_password {
         return Err(AppError::bad_request("passwords do not match"));
@@ -92,6 +119,8 @@ pub async fn setup(
     let admin = db::admin::get_admin(&state.system_db)
         .await?
         .ok_or_else(|| AppError::internal("admin missing after create"))?;
+    *state.setup_token.lock().unwrap() = None;
+    state.login_limiter.lock().await.clear(&ip);
 
     let token = crate::auth::session::create_session(&state, admin.id).await?;
     let settings = db::settings::get_settings(&state.system_db).await?;

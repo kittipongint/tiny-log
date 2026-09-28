@@ -6,6 +6,9 @@ pub mod logs;
 pub mod metrics;
 pub mod stream;
 
+#[cfg(test)]
+mod setup_tests;
+
 use crate::state::AppState;
 use axum::routing::{get, post};
 use axum::Router;

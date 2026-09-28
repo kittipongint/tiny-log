@@ -23,6 +23,8 @@ pub struct ChangePasswordRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct SetupRequest {
+    #[serde(default)]
+    pub setup_token: String,
     pub username: String,
     pub password: String,
     pub confirm_password: String,
