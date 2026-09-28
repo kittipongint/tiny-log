@@ -46,6 +46,13 @@
         <button id="search-btn" type="button">Search</button>
       </span>
     </label>
+    <label class="search-label">
+      Trace / request id
+      <span class="search-row">
+        <input id="filter-trace" type="search" placeholder="request_id…" spellcheck="false" />
+        <button id="view-traces-btn" type="button" aria-pressed="false" title="One row per request id">Group by trace</button>
+      </span>
+    </label>
     <button id="live-btn" type="button" class="live-btn" aria-pressed="false">Live</button>
     <label class="export-label">
       Export (current filters)
@@ -95,6 +102,7 @@
         <button type="button" class="linkish" data-copy="message">Copy message</button>
         <button type="button" class="linkish" data-copy="meta">Copy meta</button>
         <button type="button" class="linkish" data-copy="json">Copy JSON</button>
+        <button type="button" class="linkish" id="d-trace-btn" hidden>Show whole trace</button>
       </div>
       <dl>
         <dt>Timestamp</dt><dd id="d-timestamp"></dd>

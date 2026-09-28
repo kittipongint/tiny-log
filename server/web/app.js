@@ -13,6 +13,12 @@ const pickAll = document.getElementById("pick-all");
 const selectBar = document.getElementById("select-bar");
 const selectCount = document.getElementById("select-count");
 const toastEl = document.getElementById("toast");
+const traceInput = document.getElementById("filter-trace");
+const viewTracesBtn = document.getElementById("view-traces-btn");
+const detailTraceBtn = document.getElementById("d-trace-btn");
+
+// "logs" = one row per line; "traces" = one row per correlation id (GET /api/v1/traces).
+let view = "logs";
 
 // Picked rows by id, in the order they were picked. Cleared when the list reloads.
 const picked = new Map();
@@ -51,6 +57,32 @@ function levelClass(level) {
   return `level level-${String(level || "").toLowerCase()}`;
 }
 
+// Same keys, same order as the server's logs.trace_id (migrations/logs/0002_trace_id.sql).
+function traceIdOf(log) {
+  const m = log && log.meta;
+  if (!m || typeof m !== "object") return "";
+  for (const k of ["request_id", "correlation_id", "trace_id"]) {
+    const v = m[k];
+    if (v !== undefined && v !== null && String(v) !== "") return String(v).slice(0, 128);
+  }
+  return "";
+}
+
+function traceChip(id) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "trace-chip";
+  b.title = `Show every line of ${id}`;
+  b.textContent = id.length > 14 ? id.slice(0, 12) + "…" : id;
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openTrace(id);
+  });
+  return b;
+}
+
+let traceStartMs = 0;
+
 function createRow(log) {
   const tr = document.createElement("tr");
   tr.dataset.id = String(log.id);
@@ -67,6 +99,16 @@ function createRow(log) {
 
   const tdTime = document.createElement("td");
   tdTime.textContent = formatTime(log.timestamp);
+  if (traceInput.value.trim() && traceStartMs) {
+    // Inside one trace, how far into the request each line happened says more than the clock.
+    const off = Date.parse(log.timestamp) - traceStartMs;
+    if (Number.isFinite(off)) {
+      const span = document.createElement("span");
+      span.className = "trace-offset";
+      span.textContent = ` +${off}ms`;
+      tdTime.appendChild(span);
+    }
+  }
 
   const tdApp = document.createElement("td");
   tdApp.textContent = log.app || "";
@@ -78,7 +120,15 @@ function createRow(log) {
   tdLevel.appendChild(levelSpan);
 
   const tdMsg = document.createElement("td");
-  tdMsg.textContent = log.message || "";
+  const tid = traceIdOf(log);
+  if (tid && !traceInput.value.trim()) tdMsg.appendChild(traceChip(tid));
+  if (log.source === "browser") {
+    const src = document.createElement("span");
+    src.className = "source-tag";
+    src.textContent = "browser";
+    tdMsg.appendChild(src);
+  }
+  tdMsg.appendChild(document.createTextNode(log.message || ""));
 
   tr.append(tdPick, tdTime, tdApp, tdLevel, tdMsg);
   tr.addEventListener("click", (e) => {
@@ -213,6 +263,9 @@ function showDetail(log) {
   document.getElementById("d-message").textContent = log.message || "";
   const metaEl = document.getElementById("d-meta");
   metaEl.textContent = log.meta ? JSON.stringify(log.meta, null, 2) : "—";
+  const tid = traceIdOf(log);
+  detailTraceBtn.hidden = !tid;
+  detailTraceBtn.dataset.trace = tid;
   dialog.showModal();
 }
 
@@ -252,7 +305,14 @@ function queryString() {
   if (appFilter.value) params.set("app", appFilter.value);
   if (levelFilter.value) params.set("level", levelFilter.value);
   if (searchInput.value.trim()) params.set("search", searchInput.value.trim());
-  params.set("limit", "100");
+  const trace = traceInput.value.trim();
+  if (trace) {
+    params.set("trace", trace);
+    params.set("order", "asc");
+    params.set("limit", "500");
+  } else {
+    params.set("limit", "100");
+  }
   return params.toString();
 }
 
@@ -260,6 +320,7 @@ function queryString() {
 function exportUrl() {
   const params = new URLSearchParams(queryString());
   params.delete("limit");
+  params.delete("order");
   params.set("format", document.getElementById("export-format").value);
   return `/api/v1/logs/export?${params}`;
 }
@@ -279,13 +340,19 @@ function matchesFilters(log) {
   if (levelFilter.value && String(log.level).toLowerCase() !== levelFilter.value) return false;
   const q = searchInput.value.trim().toLowerCase();
   if (q && !String(log.message || "").toLowerCase().includes(q)) return false;
+  const t = traceInput.value.trim();
+  if (t && traceIdOf(log) !== t) return false;
   return true;
 }
 
 async function loadLogs() {
+  syncUrl();
+  if (view === "traces") return loadTraces();
   const res = await api(`/api/v1/logs?${queryString()}`);
   if (!res.ok) throw new Error("failed to load logs");
   const data = await res.json();
+  const logs = data.logs || [];
+  traceStartMs = traceInput.value.trim() && logs.length ? Date.parse(logs[0].timestamp) : 0;
   rowsEl.replaceChildren();
   picked.clear();
   appendLogs(data.logs || []);
@@ -293,6 +360,97 @@ async function loadLogs() {
   pendingNew = [];
   updateBanner();
 }
+
+// ---- traces ---------------------------------------------------------------------------------
+
+function openTrace(id) {
+  traceInput.value = id;
+  setView("logs");
+  if (dialog.open) dialog.close();
+  loadLogs().catch(console.error);
+}
+
+function setView(v) {
+  view = v;
+  viewTracesBtn.setAttribute("aria-pressed", v === "traces" ? "true" : "false");
+  document.body.classList.toggle("view-traces", v === "traces");
+}
+
+function formatDuration(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms / 60000)}m`;
+}
+
+function createTraceRow(t) {
+  const tr = document.createElement("tr");
+  tr.className = "trace-row";
+  const tdPick = document.createElement("td");
+  tdPick.className = "pick";
+  const tdTime = document.createElement("td");
+  tdTime.textContent = formatTime(new Date(t.last_ms).toISOString());
+  const tdApp = document.createElement("td");
+  tdApp.textContent = t.apps || "";
+  const tdLevel = document.createElement("td");
+  const lv = document.createElement("span");
+  lv.className = levelClass(t.level);
+  lv.textContent = String(t.level || "").toUpperCase();
+  tdLevel.appendChild(lv);
+  const tdMsg = document.createElement("td");
+  tdMsg.appendChild(traceChip(t.trace_id));
+  const stats = document.createElement("span");
+  stats.className = "trace-stats";
+  const sources = t.sources && t.sources.includes("browser") ? " · browser" : "";
+  stats.textContent = `${t.lines} line${t.lines === 1 ? "" : "s"} · ${formatDuration(t.last_ms - t.first_ms)}${sources}`;
+  tdMsg.append(stats, document.createTextNode(t.first_message || ""));
+  tr.append(tdPick, tdTime, tdApp, tdLevel, tdMsg);
+  tr.addEventListener("click", () => openTrace(t.trace_id));
+  return tr;
+}
+
+async function loadTraces() {
+  const params = new URLSearchParams(queryString());
+  params.delete("trace");
+  params.delete("order");
+  params.set("limit", "200");
+  const res = await api(`/api/v1/traces?${params}`);
+  if (!res.ok) throw new Error("failed to load traces");
+  const data = await res.json();
+  rowsEl.replaceChildren();
+  picked.clear();
+  updateSelectBar();
+  const frag = document.createDocumentFragment();
+  for (const t of data.traces || []) frag.appendChild(createTraceRow(t));
+  rowsEl.appendChild(frag);
+  pendingNew = [];
+  updateBanner();
+}
+
+// ?trace=… in the address bar, so a trace can be linked from a ticket or a chat.
+function syncUrl() {
+  const url = new URL(window.location.href);
+  const t = traceInput.value.trim();
+  if (t) url.searchParams.set("trace", t);
+  else url.searchParams.delete("trace");
+  if (view === "traces") url.searchParams.set("view", "traces");
+  else url.searchParams.delete("view");
+  history.replaceState(null, "", url);
+}
+
+viewTracesBtn.addEventListener("click", () => {
+  setView(view === "traces" ? "logs" : "traces");
+  if (view === "traces") traceInput.value = "";
+  loadLogs().catch(console.error);
+});
+traceInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    setView("logs");
+    loadLogs().catch(console.error);
+  }
+});
+// The search box's clear (×) empties the field without a keydown.
+traceInput.addEventListener("search", () => loadLogs().catch(console.error));
+detailTraceBtn.addEventListener("click", () => openTrace(detailTraceBtn.dataset.trace));
 
 async function loadApps() {
   const res = await api("/api/v1/apps");
@@ -335,7 +493,7 @@ function startLive() {
     } catch {
       return;
     }
-    if (!matchesFilters(log)) return;
+    if (view === "traces" || !matchesFilters(log)) return;
 
     if (stickToTop || isNearTop()) {
       prependLog(log);
@@ -382,6 +540,9 @@ async function boot() {
     badge.textContent = "anonymous";
     logoutBtn.hidden = true;
   }
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("trace")) traceInput.value = params.get("trace");
+  if (params.get("view") === "traces") setView("traces");
   await loadApps();
   await loadLogs();
   startLive();

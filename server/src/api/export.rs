@@ -26,6 +26,7 @@ pub struct ExportQuery {
     pub level: Option<String>,
     pub source: Option<String>,
     pub search: Option<String>,
+    pub trace: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
     /// Max rows (default and cap: EXPORT_MAX).
@@ -86,10 +87,10 @@ pub async fn export_logs(
         level: q.level,
         source: q.source,
         search: q.search,
+        trace: q.trace,
         from: q.from,
         to: q.to,
-        limit: None,
-        offset: None,
+        ..Default::default()
     };
 
     // First page before the 200 goes out: a bad `from` or a DB error is a proper

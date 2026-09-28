@@ -100,6 +100,15 @@ pub async fn list_logs(
     Ok(Json(json!({ "logs": logs })))
 }
 
+pub async fn list_traces(
+    State(state): State<AppState>,
+    _user: AuthUser,
+    Query(query): Query<LogQuery>,
+) -> AppResult<Json<Value>> {
+    let traces = db::logs::query_traces(&state.logs_db, &query).await?;
+    Ok(Json(json!({ "traces": traces })))
+}
+
 pub async fn get_log(
     State(state): State<AppState>,
     _user: AuthUser,

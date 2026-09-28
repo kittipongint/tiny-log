@@ -2,13 +2,16 @@ use crate::error::{AppError, AppResult};
 use crate::models::log::{ms_to_rfc3339, InsertLog, LogEntry, LogQuery};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
+/// Insert with the line's correlation id read from its meta (?6). Same expression as the backfill
+/// in migrations/logs/0002_trace_id.sql.
+const INSERT_SQL: &str = "INSERT INTO logs (timestamp_ms, app, level, source, message, meta_json, trace_id) \
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULLIF(substr(CAST(COALESCE(\
+    json_extract(?6, '$.request_id'), \
+    json_extract(?6, '$.correlation_id'), \
+    json_extract(?6, '$.trace_id')) AS TEXT), 1, 128), ''))";
+
 pub async fn insert_log(pool: &SqlitePool, log: &InsertLog) -> AppResult<i64> {
-    let result = sqlx::query(
-        r#"
-        INSERT INTO logs (timestamp_ms, app, level, source, message, meta_json)
-        VALUES (?, ?, ?, ?, ?, ?)
-        "#,
-    )
+    let result = sqlx::query(INSERT_SQL)
     .bind(log.timestamp_ms)
     .bind(&log.app)
     .bind(&log.level)
@@ -26,12 +29,7 @@ pub async fn insert_logs_batch(pool: &SqlitePool, logs: &[InsertLog]) -> AppResu
     let mut ids = Vec::with_capacity(logs.len());
 
     for log in logs {
-        let result = sqlx::query(
-            r#"
-            INSERT INTO logs (timestamp_ms, app, level, source, message, meta_json)
-            VALUES (?, ?, ?, ?, ?, ?)
-            "#,
-        )
+        let result = sqlx::query(INSERT_SQL)
         .bind(log.timestamp_ms)
         .bind(&log.app)
         .bind(&log.level)
@@ -108,7 +106,12 @@ pub async fn query_logs(pool: &SqlitePool, query: &LogQuery) -> AppResult<Vec<Lo
     );
     push_filters(&mut qb, query)?;
 
-    qb.push(" ORDER BY timestamp_ms DESC, id DESC LIMIT ");
+    // A trace reads top to bottom in the order it happened.
+    if query.order.as_deref() == Some("asc") {
+        qb.push(" ORDER BY timestamp_ms ASC, id ASC LIMIT ");
+    } else {
+        qb.push(" ORDER BY timestamp_ms DESC, id DESC LIMIT ");
+    }
     qb.push_bind(limit);
     qb.push(" OFFSET ");
     qb.push_bind(offset);
@@ -171,6 +174,11 @@ fn push_filters(qb: &mut QueryBuilder<Sqlite>, query: &LogQuery) -> AppResult<()
         qb.push_bind(source.clone());
     }
 
+    if let Some(trace) = query.trace.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        qb.push(" AND trace_id = ");
+        qb.push_bind(trace.to_string());
+    }
+
     if let Some(search) = query.search.as_ref().filter(|s| !s.is_empty()) {
         qb.push(" AND message LIKE ");
         qb.push_bind(format!("%{search}%"));
@@ -186,6 +194,58 @@ fn push_filters(qb: &mut QueryBuilder<Sqlite>, query: &LogQuery) -> AppResult<()
         qb.push_bind(parse_bound(to)?);
     }
     Ok(())
+}
+
+/// One request (or any group of lines sharing a correlation id) as a summary row.
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct TraceSummary {
+    pub trace_id: String,
+    pub first_ms: i64,
+    pub last_ms: i64,
+    pub lines: i64,
+    /// Worst level in the trace: debug < info < warn < error < fatal.
+    pub level: String,
+    pub apps: Option<String>,
+    pub sources: Option<String>,
+    /// Message of the trace's first line (usually what started it).
+    pub first_message: Option<String>,
+}
+
+/// Traces that have at least one line matching the filters, newest activity first. The counts
+/// cover the whole trace, not only the matching lines. Without `from`, looks at the last 24 h so
+/// the GROUP BY stays cheap on a big table.
+pub async fn query_traces(pool: &SqlitePool, query: &LogQuery) -> AppResult<Vec<TraceSummary>> {
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    let mut q = LogQuery { ..query.clone() };
+    if q.from.as_deref().map_or(true, str::is_empty) {
+        q.from = Some((chrono::Utc::now().timestamp_millis() - 24 * 60 * 60 * 1000).to_string());
+    }
+
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "WITH hit AS (SELECT trace_id, MAX(timestamp_ms) AS last_hit FROM logs \
+         WHERE trace_id IS NOT NULL",
+    );
+    push_filters(&mut qb, &q)?;
+    qb.push(" GROUP BY trace_id ORDER BY last_hit DESC LIMIT ");
+    qb.push_bind(limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+    qb.push(
+        ") SELECT l.trace_id AS trace_id, MIN(l.timestamp_ms) AS first_ms, \
+         MAX(l.timestamp_ms) AS last_ms, COUNT(*) AS lines, \
+         CASE MAX(CASE l.level WHEN 'fatal' THEN 4 WHEN 'error' THEN 3 WHEN 'warn' THEN 2 \
+              WHEN 'info' THEN 1 ELSE 0 END) \
+              WHEN 4 THEN 'fatal' WHEN 3 THEN 'error' WHEN 2 THEN 'warn' WHEN 1 THEN 'info' \
+              ELSE 'debug' END AS level, \
+         GROUP_CONCAT(DISTINCT l.app) AS apps, GROUP_CONCAT(DISTINCT l.source) AS sources, \
+         (SELECT f.message FROM logs f WHERE f.trace_id = l.trace_id \
+          ORDER BY f.timestamp_ms ASC, f.id ASC LIMIT 1) AS first_message \
+         FROM logs l JOIN hit h ON h.trace_id = l.trace_id \
+         GROUP BY l.trace_id ORDER BY MAX(h.last_hit) DESC",
+    );
+    Ok(qb.build_query_as::<TraceSummary>().fetch_all(pool).await?)
 }
 
 pub async fn list_apps(pool: &SqlitePool) -> AppResult<Vec<String>> {

@@ -148,9 +148,13 @@ pub struct BatchLogsRequest {
     pub logs: Vec<NewLog>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct LogQuery {
     pub app: Option<String>,
+    /// Correlation id: only the lines of this request / trace (logs.trace_id).
+    pub trace: Option<String>,
+    /// "asc" = oldest first (how a trace reads); anything else = newest first.
+    pub order: Option<String>,
     pub level: Option<String>,
     pub source: Option<String>,
     pub search: Option<String>,

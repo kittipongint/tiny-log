@@ -544,3 +544,29 @@ dialog::backdrop {
   .export-label select { width: 100%; }
   .detail dl { grid-template-columns: 1fr; }
 }
+
+/* ---- traces (correlation id) ---- */
+.trace-chip {
+  font: 0.75rem var(--mono);
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  border-radius: 999px;
+  padding: 0 0.45rem;
+  margin-right: 0.45rem;
+  cursor: pointer;
+  vertical-align: 1px;
+}
+.trace-chip:hover { background: var(--accent-dim); color: var(--text); }
+.trace-offset { color: var(--muted); font: 0.75rem var(--mono); }
+.trace-stats { color: var(--muted); font-size: 0.8rem; margin-right: 0.5rem; }
+.source-tag {
+  font-size: 0.7rem;
+  color: var(--warn);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  margin-right: 0.4rem;
+}
+#view-traces-btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.trace-row { cursor: pointer; }

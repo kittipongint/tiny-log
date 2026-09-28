@@ -14,6 +14,8 @@ mod ingest_tests;
 mod setup_tests;
 #[cfg(test)]
 mod export_tests;
+#[cfg(test)]
+mod trace_tests;
 
 use crate::state::AppState;
 use axum::routing::{get, post};
@@ -33,6 +35,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/logs/stream", get(stream::stream_logs))
         .route("/api/v1/logs/export", get(export::export_logs))
         .route("/api/v1/logs/{id}", get(logs::get_log))
+        .route("/api/v1/traces", get(logs::list_traces))
         .route("/api/v1/client/logs", post(client_logs::create_client_log))
         .route("/api/v1/metrics/batch", post(metrics::ingest_batch))
         .route("/api/v1/metrics/overview", get(metrics::overview))
