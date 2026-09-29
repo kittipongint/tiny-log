@@ -335,6 +335,12 @@
             "name": "offset",
             "in": "query",
             "schema": { "type": "integer", "default": 0 }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Next page of the newest-first list: only rows older than the row with this id (the last id of the previous page).",
+            "schema": { "type": "integer" }
           }
         ],
         "responses": {

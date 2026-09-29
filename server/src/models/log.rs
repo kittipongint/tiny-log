@@ -162,6 +162,9 @@ pub struct LogQuery {
     pub to: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    /// Keyset paging for the newest-first list: only rows older than the row with this id.
+    /// Stays correct while new lines stream in (OFFSET shifts under inserts).
+    pub before: Option<i64>,
 }
 
 #[cfg(test)]

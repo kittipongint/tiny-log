@@ -366,6 +366,17 @@ label {
   overflow: auto;
 }
 
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: 1rem 0;
+}
+.load-more button {
+  background: var(--bg-elevated);
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+}
+
 .log-table {
   width: 100%;
   border-collapse: collapse;

@@ -311,7 +311,7 @@ function queryString() {
     params.set("order", "asc");
     params.set("limit", "500");
   } else {
-    params.set("limit", "100");
+    params.set("limit", String(PAGE_SIZE));
   }
   return params.toString();
 }
@@ -355,10 +355,68 @@ async function loadLogs() {
   traceStartMs = traceInput.value.trim() && logs.length ? Date.parse(logs[0].timestamp) : 0;
   rowsEl.replaceChildren();
   picked.clear();
-  appendLogs(data.logs || []);
+  appendLogs(logs);
+  setPaging(logs, !traceInput.value.trim());
   updateSelectBar();
   pendingNew = [];
   updateBanner();
+}
+
+// ---- older pages ------------------------------------------------------------------------------
+// Keyset paging (?before=<oldest id shown>): new lines arriving live don't shift the pages.
+
+const PAGE_SIZE = 100;
+const loadMore = document.getElementById("load-more");
+const loadMoreBtn = document.getElementById("load-more-btn");
+let oldestId = null;
+let hasMore = false;
+let loadingOlder = false;
+let listGen = 0; // bumped on every reload so a late older page can't land in a new list
+
+function setPaging(logs, pageable) {
+  listGen++;
+  oldestId = logs.length ? logs[logs.length - 1].id : null;
+  hasMore = pageable && logs.length === PAGE_SIZE;
+  loadMore.hidden = !hasMore;
+  loadMoreBtn.disabled = false;
+  loadMoreBtn.textContent = "Load older";
+}
+
+async function loadOlder() {
+  if (!hasMore || loadingOlder || oldestId === null || view !== "logs") return;
+  loadingOlder = true;
+  loadMoreBtn.disabled = true;
+  loadMoreBtn.textContent = "Loading…";
+  const gen = listGen;
+  try {
+    const params = new URLSearchParams(queryString());
+    params.set("before", String(oldestId));
+    const res = await api(`/api/v1/logs?${params}`);
+    if (!res.ok) throw new Error("failed to load older logs");
+    const logs = (await res.json()).logs || [];
+    if (gen !== listGen) return;
+    appendLogs(logs.filter((l) => !rowsEl.querySelector(`[data-id="${l.id}"]`)));
+    if (logs.length) oldestId = logs[logs.length - 1].id;
+    hasMore = logs.length === PAGE_SIZE;
+    loadMore.hidden = !hasMore;
+    if (picked.size) updateSelectBar();
+  } catch (err) {
+    console.error(err);
+    if (gen === listGen) toast("Could not load older logs", true);
+  } finally {
+    loadingOlder = false;
+    if (gen === listGen) {
+      loadMoreBtn.disabled = false;
+      loadMoreBtn.textContent = "Load older";
+    }
+  }
+}
+
+loadMoreBtn.addEventListener("click", () => loadOlder());
+if ("IntersectionObserver" in window) {
+  new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) loadOlder();
+  }, { rootMargin: "400px" }).observe(loadMore);
 }
 
 // ---- traces ---------------------------------------------------------------------------------
@@ -416,6 +474,7 @@ async function loadTraces() {
   const res = await api(`/api/v1/traces?${params}`);
   if (!res.ok) throw new Error("failed to load traces");
   const data = await res.json();
+  setPaging([], false);
   rowsEl.replaceChildren();
   picked.clear();
   updateSelectBar();

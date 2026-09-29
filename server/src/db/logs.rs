@@ -105,6 +105,11 @@ pub async fn query_logs(pool: &SqlitePool, query: &LogQuery) -> AppResult<Vec<Lo
         "SELECT id, timestamp_ms, app, level, source, message, meta_json FROM logs WHERE 1=1",
     );
     push_filters(&mut qb, query)?;
+    if let Some(id) = query.before {
+        qb.push(" AND (timestamp_ms, id) < (SELECT timestamp_ms, id FROM logs WHERE id = ");
+        qb.push_bind(id);
+        qb.push(")");
+    }
 
     // A trace reads top to bottom in the order it happened.
     if query.order.as_deref() == Some("asc") {

@@ -86,3 +86,39 @@ async fn trace_filter_and_grouping() {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(String::from_utf8(bytes.to_vec()).unwrap().lines().count(), 3);
 }
+
+#[tokio::test]
+async fn before_pages_back_through_older_rows() {
+    let (router, state) = app(test_config(AuthMode::Anonymous, None)).await;
+    let now = chrono::Utc::now().timestamp_millis();
+    // two rows share a timestamp so the page edge has to break the tie on id
+    let stamps = [now - 5000, now - 4000, now - 3000, now - 3000, now - 1000];
+    let inserts: Vec<_> = stamps
+        .iter()
+        .enumerate()
+        .map(|(i, ts)| line(*ts, "wordyguru", "info", &format!("m{i}"), json!({})).validate_and_normalize().unwrap())
+        .collect();
+    crate::db::logs::insert_logs_batch(&state.logs_db, &inserts).await.unwrap();
+
+    let msgs = |body: &Value| -> Vec<String> {
+        body["logs"].as_array().unwrap().iter().map(|l| l["message"].as_str().unwrap().to_string()).collect()
+    };
+    let (_, p1) = get_json(&router, "/api/v1/logs?limit=2").await;
+    assert_eq!(msgs(&p1), ["m4", "m3"]);
+    let last = p1["logs"][1]["id"].as_i64().unwrap();
+
+    // a new line arriving between pages must not shift the next page
+    let late = line(now, "wordyguru", "info", "late", json!({})).validate_and_normalize().unwrap();
+    crate::db::logs::insert_log(&state.logs_db, &late).await.unwrap();
+
+    let (st, p2) = get_json(&router, &format!("/api/v1/logs?limit=2&before={last}")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(msgs(&p2), ["m2", "m1"]);
+    let last = p2["logs"][1]["id"].as_i64().unwrap();
+    let (_, p3) = get_json(&router, &format!("/api/v1/logs?limit=2&before={last}")).await;
+    assert_eq!(msgs(&p3), ["m0"]);
+
+    // filters still apply on older pages
+    let (_, none) = get_json(&router, &format!("/api/v1/logs?app=hora&before={last}")).await;
+    assert!(none["logs"].as_array().unwrap().is_empty());
+}
