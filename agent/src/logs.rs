@@ -43,7 +43,7 @@ impl LogLine {
             level,
             message,
             timestamp: Some(now_rfc3339()),
-            source: Some(host.to_string()),
+            source: Some(SOURCE_AGENT.into()),
             meta: Some(Value::Object(meta)),
         }
     }
@@ -51,6 +51,21 @@ impl LogLine {
     /// Bytes this line costs in the queue (message dominates).
     pub fn weight(&self) -> usize {
         self.message.len() + self.app.len() + 128
+    }
+}
+
+/// `source` column values, so the Logs page can filter agent lines apart from the apps' own
+/// `server` / `browser` lines. The machine goes in `meta.host`, as the apps do.
+pub const SOURCE_AGENT: &str = "agent";
+pub const SOURCE_AGENT_FILE: &str = "agent-file";
+pub const SOURCE_AGENT_DOCKER: &str = "agent-docker";
+
+/// The `source` for a reader whose meta says `"source": "file" | "docker"`.
+fn source_for(meta: &Value) -> &'static str {
+    match meta.get("source").and_then(Value::as_str) {
+        Some("file") => SOURCE_AGENT_FILE,
+        Some("docker") => SOURCE_AGENT_DOCKER,
+        _ => SOURCE_AGENT,
     }
 }
 
@@ -336,7 +351,7 @@ fn word_level(lower: &str) -> &'static str {
 /// Per-source state between the reader and the queue.
 pub struct SourceSink {
     app: String,
-    host: String,
+    source: &'static str,
     filter: LineFilter,
     limiter: RateLimiter,
     meta: Map<String, Value>,
@@ -352,6 +367,7 @@ impl SourceSink {
         meta: Value,
         queue: Arc<LogQueue>,
     ) -> Self {
+        let source = source_for(&meta);
         let mut base = Map::new();
         base.insert("host".into(), json!(host));
         base.insert("log_origin".into(), json!("agent"));
@@ -360,7 +376,7 @@ impl SourceSink {
         }
         Self {
             app: app.to_string(),
-            host: host.to_string(),
+            source,
             filter,
             limiter: RateLimiter::new(max_lines_per_min, Instant::now()),
             meta: base,
@@ -390,7 +406,7 @@ impl SourceSink {
             level: detect_level(raw),
             message: truncate_line(raw),
             timestamp: Some(timestamp),
-            source: Some(self.host.clone()),
+            source: Some(self.source.into()),
             meta: Some(Value::Object(meta)),
         });
     }
@@ -402,7 +418,7 @@ impl SourceSink {
             level,
             message,
             timestamp: Some(now_rfc3339()),
-            source: Some(self.host.clone()),
+            source: Some(self.source.into()),
             meta: Some(Value::Object(self.meta.clone())),
         });
     }
@@ -689,12 +705,34 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].level, "warn");
         assert_eq!(lines[0].timestamp.as_deref(), Some("2026-10-09T17:00:00.000001Z"));
-        assert_eq!(lines[0].source.as_deref(), Some("hfc"));
+        assert_eq!(lines[0].source.as_deref(), Some("agent-file"));
         let meta = lines[1].meta.as_ref().unwrap();
         assert_eq!(meta["host"], "hfc");
         assert_eq!(meta["source"], "file");
         assert_eq!(meta["log_origin"], "agent");
         assert_eq!(meta["stream"], "stderr");
         assert_eq!(lines[1].level, "error");
+    }
+
+    #[test]
+    fn source_column_names_the_kind_not_the_host() {
+        let q = Arc::new(LogQueue::new(100, 1 << 20));
+        let mut sink = SourceSink::new(
+            "VM1",
+            "searchapi",
+            LineFilter::default(),
+            0,
+            json!({"source": "docker", "container": "appsearchapi"}),
+            q.clone(),
+        );
+        sink.line("es_transport_failed", None, None);
+        sink.notice("info", "container restarted".into());
+        let (lines, _) = q.take(10);
+        assert!(lines.iter().all(|l| l.source.as_deref() == Some("agent-docker")));
+        assert_eq!(lines[0].meta.as_ref().unwrap()["host"], "VM1");
+
+        let own = LogLine::agent("hfc", "warn", "disk root (/) 91% used on hfc".into(), json!({}));
+        assert_eq!(own.source.as_deref(), Some("agent"));
+        assert_eq!(own.meta.as_ref().unwrap()["host"], "hfc");
     }
 }

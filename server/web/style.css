@@ -579,5 +579,6 @@ dialog::backdrop {
   padding: 0 0.3rem;
   margin-right: 0.4rem;
 }
+.source-agent { color: var(--accent); }
 #view-traces-btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
 .trace-row { cursor: pointer; }

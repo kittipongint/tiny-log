@@ -1,6 +1,7 @@
 const rowsEl = document.getElementById("log-rows");
 const appFilter = document.getElementById("filter-app");
 const levelFilter = document.getElementById("filter-level");
+const sourceFilter = document.getElementById("filter-source");
 const searchInput = document.getElementById("filter-search");
 const searchBtn = document.getElementById("search-btn");
 const liveBtn = document.getElementById("live-btn");
@@ -122,10 +123,11 @@ function createRow(log) {
   const tdMsg = document.createElement("td");
   const tid = traceIdOf(log);
   if (tid && !traceInput.value.trim()) tdMsg.appendChild(traceChip(tid));
-  if (log.source === "browser") {
+  const tag = sourceTag(log.source);
+  if (tag) {
     const src = document.createElement("span");
-    src.className = "source-tag";
-    src.textContent = "browser";
+    src.className = tag.className;
+    src.textContent = tag.text;
     tdMsg.appendChild(src);
   }
   tdMsg.appendChild(document.createTextNode(log.message || ""));
@@ -304,6 +306,7 @@ function queryString() {
   const params = new URLSearchParams();
   if (appFilter.value) params.set("app", appFilter.value);
   if (levelFilter.value) params.set("level", levelFilter.value);
+  if (sourceFilter.value) params.set("source", sourceFilter.value);
   if (searchInput.value.trim()) params.set("search", searchInput.value.trim());
   const trace = traceInput.value.trim();
   if (trace) {
@@ -335,9 +338,27 @@ document.getElementById("export-btn").addEventListener("click", () => {
   toast("Export started");
 });
 
+// Row tag for lines not written by the app's server code: browser, or a host agent reading a
+// file / container (MySQL, Elasticsearch, search-api stdout). Agent rows carry their host.
+function sourceTag(source) {
+  switch (source) {
+    case "browser":
+      return { text: "browser", className: "source-tag" };
+    case "agent-file":
+      return { text: "agent · file", className: "source-tag source-agent" };
+    case "agent-docker":
+      return { text: "agent · docker", className: "source-tag source-agent" };
+    case "agent":
+      return { text: "agent", className: "source-tag source-agent" };
+    default:
+      return null;
+  }
+}
+
 function matchesFilters(log) {
   if (appFilter.value && log.app !== appFilter.value) return false;
   if (levelFilter.value && String(log.level).toLowerCase() !== levelFilter.value) return false;
+  if (sourceFilter.value && log.source !== sourceFilter.value) return false;
   const q = searchInput.value.trim().toLowerCase();
   if (q && !String(log.message || "").toLowerCase().includes(q)) return false;
   const t = traceInput.value.trim();
@@ -578,6 +599,7 @@ searchInput.addEventListener("keydown", (e) => {
 });
 appFilter.addEventListener("change", () => loadLogs().catch(console.error));
 levelFilter.addEventListener("change", () => loadLogs().catch(console.error));
+sourceFilter.addEventListener("change", () => loadLogs().catch(console.error));
 
 logoutBtn.addEventListener("click", async () => {
   await api("/api/auth/logout", { method: "POST" });

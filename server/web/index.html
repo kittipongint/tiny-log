@@ -39,6 +39,17 @@
         <option value="fatal">fatal</option>
       </select>
     </label>
+    <label>
+      Source
+      <select id="filter-source" title="Where the line came from">
+        <option value="">All</option>
+        <option value="server">server (app code)</option>
+        <option value="browser">browser</option>
+        <option value="agent-file">agent · file</option>
+        <option value="agent-docker">agent · docker</option>
+        <option value="agent">agent itself</option>
+      </select>
+    </label>
     <label class="search-label">
       Search
       <span class="search-row">
