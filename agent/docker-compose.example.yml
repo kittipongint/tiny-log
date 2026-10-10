@@ -1,6 +1,10 @@
 # Example: agent monitors labeled services in the same Docker Compose stack.
 # Start with: docker compose -f agent/docker-compose.example.yml up -d
 # Set TINY_LOG_URL / TINY_LOG_API_KEY to your Tiny Log server.
+#
+# Logs: any container labelled `tiny-log.logs: <app>` has its stdout/stderr shipped to
+# /api/v1/logs/batch (optional tiny-log.logs.include / .exclude regex,
+# tiny-log.logs.max_lines_per_min). Picked up within 30 s, follows restarts.
 
 services:
   mysql:
@@ -16,6 +20,8 @@ services:
     labels:
       tiny-log.monitor: "true"
       tiny-log.service: "mysql"
+      tiny-log.logs: "mysql"
+      tiny-log.logs.include: "\\[(ERROR|Warning)\\]"
 
   redis:
     image: redis:7-alpine
@@ -48,6 +54,15 @@ services:
       tiny-log.service: "elasticsearch"
       tiny-log.health: "http://elasticsearch:9200/_cluster/health"
       tiny-log.load: "http://elasticsearch:9200/_cluster/health"
+      tiny-log.logs: "elasticsearch"
+      tiny-log.logs.include: "(?i)\"log.level\": ?\"(warn|error|fatal)"
+
+  # An app container: everything it logs is shipped, at most 300 lines/min.
+  searchapi:
+    image: alpine:3.21
+    command: ["sh", "-c", "while true; do echo 'level=info msg=tick'; sleep 5; done"]
+    labels:
+      tiny-log.logs: "searchapi"
 
   tiny-log-agent:
     image: tiny-log-agent:latest
@@ -58,6 +73,7 @@ services:
       TINY_LOG_HOST_NAME: ${TINY_LOG_HOST_NAME:-compose-host}
       TINY_LOG_SYSTEM_INTERVAL_SECS: 60
       TINY_LOG_SERVICE_INTERVAL_SECS: 120
+      TINY_LOG_DISK_WARN_PCT: 85
       TINY_LOG_DOCKER: "true"
       TINY_LOG_DOCKER_SOCK: /var/run/docker.sock
       TINY_LOG_AGENT_CONFIG: /etc/tiny-log/agent.toml

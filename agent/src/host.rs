@@ -1,7 +1,11 @@
 use crate::config::{AgentConfig, DiskMount};
+use crate::logs::LogLine;
 use anyhow::Result;
 use serde::Serialize;
+use serde_json::json;
+use std::collections::HashMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Serialize)]
 pub struct DiskSample {
@@ -202,4 +206,138 @@ fn read_cpu_times() -> Option<(u64, u64)> {
     let idle = nums[3] + nums.get(4).copied().unwrap_or(0);
     let total: u64 = nums.iter().sum();
     Some((idle, total))
+}
+
+/// Repeat a still-full disk at most this often.
+pub const DISK_WARN_REPEAT: Duration = Duration::from_secs(30 * 60);
+/// At or above this a disk line is `error` (MySQL stops writing well before 100 %).
+pub const DISK_ERROR_PCT: f64 = 95.0;
+/// Back below `warn_pct - this` counts as recovered (no flapping around the threshold).
+const DISK_RECOVER_MARGIN: f64 = 1.0;
+
+/// Turns system samples into `agent` log lines when a disk crosses `disk_warn_pct`.
+pub struct DiskWarner {
+    warn_pct: f64,
+    state: HashMap<String, DiskState>,
+}
+
+struct DiskState {
+    last_sent: Instant,
+    last_level: &'static str,
+}
+
+impl DiskWarner {
+    pub fn new(warn_pct: u64) -> Self {
+        Self {
+            warn_pct: warn_pct as f64,
+            state: HashMap::new(),
+        }
+    }
+
+    pub fn check(&mut self, host: &str, disks: &[DiskSample], now: Instant) -> Vec<LogLine> {
+        let mut out = Vec::new();
+        for d in disks {
+            let pct = match (d.used_bytes, d.total_bytes) {
+                (Some(u), Some(t)) if t > 0 => u as f64 / t as f64 * 100.0,
+                _ => continue,
+            };
+            let shown = pct.floor() as i64;
+            let extra = json!({
+                "disk": d.name,
+                "path": d.path,
+                "used_pct": (pct * 10.0).round() / 10.0,
+                "used_bytes": d.used_bytes,
+                "total_bytes": d.total_bytes,
+            });
+            if pct >= self.warn_pct {
+                let level = if pct >= DISK_ERROR_PCT { "error" } else { "warn" };
+                let due = match self.state.get(&d.name) {
+                    None => true,
+                    Some(s) => {
+                        now.duration_since(s.last_sent) >= DISK_WARN_REPEAT
+                            // escalation to error is news; don't sit on it for 30 min
+                            || (level == "error" && s.last_level != "error")
+                    }
+                };
+                if due {
+                    out.push(LogLine::agent(
+                        host,
+                        level,
+                        format!("disk {} ({}) {shown}% used on {host}", d.name, d.path),
+                        extra,
+                    ));
+                    self.state.insert(
+                        d.name.clone(),
+                        DiskState {
+                            last_sent: now,
+                            last_level: level,
+                        },
+                    );
+                }
+            } else if pct < self.warn_pct - DISK_RECOVER_MARGIN
+                && self.state.remove(&d.name).is_some()
+            {
+                out.push(LogLine::agent(
+                    host,
+                    "info",
+                    format!("disk {} ({}) back to {shown}% used on {host}", d.name, d.path),
+                    extra,
+                ));
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn disk(pct: f64) -> Vec<DiskSample> {
+        vec![DiskSample {
+            name: "root".into(),
+            path: "/".into(),
+            used_bytes: Some((pct * 10.0) as i64),
+            total_bytes: Some(1000),
+        }]
+    }
+
+    fn msgs(lines: &[LogLine]) -> Vec<(&str, &str)> {
+        lines.iter().map(|l| (l.level, l.message.as_str())).collect()
+    }
+
+    #[test]
+    fn disk_warning_state_machine() {
+        let t0 = Instant::now();
+        let min = |m: u64| t0 + Duration::from_secs(m * 60);
+        let mut w = DiskWarner::new(85);
+        assert!(w.check("hfc", &disk(80.0), t0).is_empty());
+        let l = w.check("hfc", &disk(91.2), min(1));
+        assert_eq!(msgs(&l), vec![("warn", "disk root (/) 91% used on hfc")]);
+        assert_eq!(l[0].app, "agent");
+        assert_eq!(l[0].meta.as_ref().unwrap()["used_pct"], 91.2);
+        // still above: quiet until 30 min passed
+        assert!(w.check("hfc", &disk(92.0), min(10)).is_empty());
+        assert_eq!(w.check("hfc", &disk(92.0), min(31)).len(), 1);
+        // escalation to error is reported at once, then rate-limited again
+        let l = w.check("hfc", &disk(96.0), min(33));
+        assert_eq!(msgs(&l), vec![("error", "disk root (/) 96% used on hfc")]);
+        assert!(w.check("hfc", &disk(97.0), min(40)).is_empty());
+        assert!(w.check("hfc", &disk(90.0), min(41)).is_empty(), "de-escalation is quiet");
+        // inside the 1-point margin: not recovered yet
+        assert!(w.check("hfc", &disk(84.5), min(42)).is_empty());
+        let l = w.check("hfc", &disk(70.0), min(43));
+        assert_eq!(msgs(&l), vec![("info", "disk root (/) back to 70% used on hfc")]);
+        assert!(w.check("hfc", &disk(70.0), min(44)).is_empty());
+        // crossing again is a fresh warning
+        assert_eq!(w.check("hfc", &disk(86.0), min(45)).len(), 1);
+        // unknown sizes are skipped
+        let unknown = vec![DiskSample {
+            name: "data".into(),
+            path: "/data".into(),
+            used_bytes: None,
+            total_bytes: None,
+        }];
+        assert!(w.check("hfc", &unknown, min(46)).is_empty());
+    }
 }

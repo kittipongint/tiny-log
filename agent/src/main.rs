@@ -3,7 +3,10 @@ mod config;
 mod docker;
 mod host;
 mod load;
+mod logs;
 mod push;
+mod ship;
+mod tail;
 
 use crate::config::AgentConfig;
 use std::time::Duration;
@@ -31,20 +34,42 @@ async fn main() {
         system_interval = cfg.system_interval_secs,
         service_interval = cfg.service_interval_secs,
         docker = cfg.docker_enabled,
+        log_sources = cfg.logs.len(),
+        disk_warn_pct = cfg.disk_warn_pct,
         "agent_started"
     );
 
     let cfg = std::sync::Arc::new(cfg);
     let push_client = push::PushClient::new(cfg.clone());
 
+    // Log shipping only when something can produce lines; otherwise no queue, no task.
+    let wants_logs = !cfg.logs.is_empty() || cfg.docker_enabled || cfg.disk_warn_pct > 0;
+    let log_queue = wants_logs.then(|| {
+        let queue = std::sync::Arc::new(ship::LogQueue::new(
+            ship::QUEUE_MAX_LINES,
+            ship::QUEUE_MAX_BYTES,
+        ));
+        tokio::spawn(ship::run(cfg.clone(), queue.clone()));
+        logs::spawn_all(&cfg, &queue);
+        queue
+    });
+    let mut disk_warner = (cfg.disk_warn_pct > 0).then(|| host::DiskWarner::new(cfg.disk_warn_pct));
+
     let system_cfg = cfg.clone();
     let system_push = push_client.clone();
+    let system_queue = log_queue.clone();
     let system_handle = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(system_cfg.system_interval_secs));
         loop {
             ticker.tick().await;
             match host::sample(&system_cfg).await {
                 Ok(sample) => {
+                    if let (Some(warner), Some(queue)) = (disk_warner.as_mut(), system_queue.as_ref()) {
+                        let now = std::time::Instant::now();
+                        for line in warner.check(&system_cfg.host_name, &sample.disks, now) {
+                            queue.push(line);
+                        }
+                    }
                     if let Err(err) = system_push.send_system(sample).await {
                         warn!(error = format!("{err:#}"), "system_push_failed");
                     }

@@ -1,12 +1,19 @@
 # Bare-metal / systemd agent (run on the host, not in a container).
-# Env: TINY_LOG_URL, TINY_LOG_API_KEY, optional TINY_LOG_HOST_NAME.
+# Env: TINY_LOG_URL, TINY_LOG_API_KEY, optional TINY_LOG_HOST_NAME,
+#      TINY_LOG_MYSQL_DSN (for kind = "mysql_status"; never put credentials in this file).
 #
 # process checks need Linux /proc (CPU + RSS → load_hint / recommend).
 # elasticsearch http URL parses _cluster/health for tight load / limit hints.
 
 system_interval_secs = 60
-service_interval_secs = 120
+# 10..300. Short MySQL / ES stalls hide between 60 s samples.
+service_interval_secs = 30
 docker = false
+
+# Ship an `agent` log line when a disk reaches this % used (warn; error at ≥ 95 %),
+# at most once per 30 min per disk while above, plus one info line when it drops back.
+# 0 = off. Env: TINY_LOG_DISK_WARN_PCT.
+disk_warn_pct = 85
 
 [[disk]]
 name = "root"
@@ -17,16 +24,33 @@ path = "/"
 # name = "data"
 # path = "/mnt/data"
 
+# --- MySQL ------------------------------------------------------------------------------
+
+# Connections, refused connections, slow queries… New connection per check.
+# DSN comes from the env var named here, e.g. in /etc/tiny-log/agent.env:
+#   TINY_LOG_MYSQL_DSN=mysql://tinylog:PASSWORD@localhost/?socket=/run/mysqld/mysqld.sock
+#   (or mysql://tinylog:PASSWORD@127.0.0.1:3306/)
+# The user needs no grants (SHOW GLOBAL STATUS and @@max_connections are open to all):
+#   CREATE USER 'tinylog'@'localhost' IDENTIFIED BY '…' WITH MAX_USER_CONNECTIONS 2;
+# Do NOT give it SUPER / CONNECTION_ADMIN: those use MySQL's spare admin slot and would
+# never see "Too many connections" — which is exactly what this check should report.
+# meta: Threads_connected, Threads_running, max_connections, conn_pct, and per-interval
+# *_delta of Connection_errors_max_connections, Aborted_connects, Aborted_clients,
+# Connections, Slow_queries, Innodb_row_lock_waits (null on the first run).
+# load_hint: tight at conn_pct ≥ 80 or any refused connection since the last check;
+# watch at ≥ 60.
 [[service]]
 name = "mysql"
-kind = "tcp"
-addr = "127.0.0.1:3306"
-timeout_ms = 2000
+kind = "mysql_status"
+dsn_env = "TINY_LOG_MYSQL_DSN"
+timeout_ms = 3000
 
 [[service]]
 name = "mysql-daemon"
 kind = "process"
 match = "mysqld"
+
+# --- Redis ------------------------------------------------------------------------------
 
 [[service]]
 name = "redis"
@@ -39,6 +63,8 @@ name = "redis-daemon"
 kind = "process"
 match = "redis-server"
 
+# --- Elasticsearch ----------------------------------------------------------------------
+
 [[service]]
 name = "elasticsearch"
 kind = "http"
@@ -49,3 +75,58 @@ timeout_ms = 2000
 name = "elasticsearch-daemon"
 kind = "process"
 match = "elasticsearch"
+
+# --- Host -------------------------------------------------------------------------------
+
+# Disk / CPU-steal / network pressure (Linux): iowait_pct + steal_pct over 1 s, PSI
+# some/full avg10 for cpu, io, memory, TCP retrans_pct since the last check.
+# load_hint: tight if io full avg10 > 10, steal > 20 % or iowait > 30 %; watch at half.
+[[service]]
+name = "hfc-io"
+kind = "host_io"
+
+# Resolver health: latency of resolving `host` (falls back to `name`); watch > 500 ms.
+# [[service]]
+# name = "dns"
+# kind = "dns"
+# host = "wordyguru.com"
+# timeout_ms = 2000
+
+# --- Logs -------------------------------------------------------------------------------
+# Tail files and ship lines to /api/v1/logs/batch. Starts at the end of the file
+# (no backlog), follows logrotate (rename or copytruncate); a file that doesn't exist
+# yet is waited for. Level (error / warn / info) is detected from the line.
+#   include / exclude: regex (Rust syntax) on the raw line; exclude wins.
+#   max_lines_per_min: per source, default 300, 0 = unlimited; the overflow is
+#   reported as one warn line per minute.
+#
+# The agent user must be able to read these files. On Debian:
+#   /var/log/mysql/error.log                    group adm            (mode 0640)
+#   /var/log/elasticsearch/<cluster>.log        group elasticsearch  (dir 2750)
+# systemd/install.sh adds tiny-log-agent to `adm` and `elasticsearch` when they exist;
+# by hand: usermod -aG adm,elasticsearch tiny-log-agent && systemctl restart tiny-log-agent
+
+[[logs]]
+app = "mysql"
+file = "/var/log/mysql/error.log"
+# MySQL 8 notes every aborted connection; keep warnings and errors.
+include = "\\[(ERROR|Warning)\\]"
+
+# ES cluster name = `cluster.name` in /etc/elasticsearch/elasticsearch.yml
+# (file names below assume "elasticsearch").
+[[logs]]
+app = "elasticsearch"
+file = "/var/log/elasticsearch/elasticsearch.log"
+include = "\\[(WARN|ERROR|FATAL) ?\\]"
+
+[[logs]]
+app = "elasticsearch-slowlog"
+file = "/var/log/elasticsearch/elasticsearch_index_search_slowlog.log"
+max_lines_per_min = 60
+
+[[logs]]
+app = "elasticsearch-gc"
+file = "/var/log/elasticsearch/gc.log"
+# Only long pauses / full GCs, not every young collection.
+include = "(?i)pause full|to-space exhausted|allocation failure"
+max_lines_per_min = 30

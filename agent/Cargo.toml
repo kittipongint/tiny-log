@@ -26,3 +26,8 @@ hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http = "1"
 libc = "0.2"
+# [[logs]] include/exclude filters. regex-automata/regex-syntax are already linked via
+# tracing-subscriber's env-filter, so this adds little.
+regex = { version = "1.11", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
+# kind = "mysql_status": no TLS, pure-Rust deflate backend (no zlib C build).
+mysql_async = { version = "0.37", default-features = false, features = ["minimal-rust"] }

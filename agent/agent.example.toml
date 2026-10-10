@@ -7,6 +7,8 @@
 #   TINY_LOG_HOST_NAME=web-1
 #   TINY_LOG_SYSTEM_INTERVAL_SECS / TINY_LOG_SERVICE_INTERVAL_SECS
 #   TINY_LOG_DOCKER / TINY_LOG_DOCKER_SOCK / TINY_LOG_DISK_PATH
+#   TINY_LOG_DISK_WARN_PCT (default 85, 0 = off)
+#   TINY_LOG_MYSQL_DSN (or any name set in dsn_env) for kind = "mysql_status"
 #
 # Host samples (system_interval): CPU, mem, disks, load1/5/15, n_cpus
 # → server capacity API recommends ok | watch | scale_out | limit
@@ -18,13 +20,20 @@
 #   http  — alive + latency; ES _cluster/health → load_hint (ok/watch/tight)
 #   tcp   — port alive only
 #   process — alive + /proc CPU/RSS → load_hint + recommend (Linux host agent)
+#   mysql_status — connections / refused / slow queries (DSN from env; see bare-metal.example.toml)
+#   dns     — resolve `host` (or `name`): latency, down on timeout/error, watch > 500 ms
+#   host_io — iowait / steal / PSI / TCP retransmits (Linux)
 #   docker labels — container stats + optional health/load URLs (see docker.example.toml)
+#
+# Logs ([[logs]], docker label tiny-log.logs, disk warnings) go to /api/v1/logs/batch.
 
 system_interval_secs = 60
-service_interval_secs = 120
+service_interval_secs = 120   # 10..300
 docker = true
 docker_sock = "/var/run/docker.sock"
 # host_name = "web-1"
+# Warn line (app "agent") when a disk reaches this % used; error at ≥ 95; 0 = off.
+disk_warn_pct = 85
 
 [[disk]]
 name = "root"
@@ -51,12 +60,12 @@ name = "sshd"
 kind = "process"
 match = "sshd"
 
-# MySQL: tcp = up/down; process = CPU/mem for scale vs limit
+# MySQL: mysql_status = connections + refused + slow queries; process = CPU/mem
 [[service]]
 name = "mysql"
-kind = "tcp"
-addr = "127.0.0.1:3306"
-timeout_ms = 2000
+kind = "mysql_status"
+dsn_env = "TINY_LOG_MYSQL_DSN"   # mysql://user:pass@127.0.0.1:3306/  (never in this file)
+timeout_ms = 3000
 
 [[service]]
 name = "mysql-daemon"
@@ -85,3 +94,25 @@ timeout_ms = 2000
 name = "elasticsearch-daemon"
 kind = "process"
 match = "elasticsearch"
+
+[[service]]
+name = "host-io"
+kind = "host_io"
+
+[[service]]
+name = "dns"
+kind = "dns"
+host = "example.com"
+timeout_ms = 2000
+
+# Log sources: exactly one of file / container. include / exclude are regexes.
+[[logs]]
+app = "nginx"
+file = "/var/log/nginx/error.log"
+
+[[logs]]
+app = "api"
+container = "api"                  # container name or id (needs docker_sock)
+include = "(?i)error|warn|panic"
+exclude = "GET /health"
+max_lines_per_min = 300            # default 300, 0 = unlimited

@@ -9,12 +9,22 @@
 #        optional load probe (ES health → load_hint ok|watch|tight)
 #
 # Running containers also get one-shot Docker stats (CPU / memory) for recommend.
+#
+# Container logs → /api/v1/logs/batch (stdout/stderr, docker timestamps, follows
+# restarts and re-creates; an info line "container restarted" marks each restart):
+#   tiny-log.logs = searchapi            (app name; turns log shipping on)
+#   tiny-log.logs.include = (?i)error|warn|panic   (optional regex)
+#   tiny-log.logs.exclude = GET /health            (optional regex)
+#   tiny-log.logs.max_lines_per_min = 300          (optional; 0 = unlimited)
+# Labelled containers are picked up within 30 s; no restart of the agent needed.
 # Full stack example: docker-compose.example.yml
 
 system_interval_secs = 60
 service_interval_secs = 120
 docker = true
 docker_sock = "/var/run/docker.sock"
+# Warn line (app "agent") when a disk reaches this % used; 0 = off.
+disk_warn_pct = 85
 
 [[disk]]
 name = "root"
@@ -24,3 +34,9 @@ path = "/"
 # [[disk]]
 # name = "data"
 # path = "/mnt/data"
+
+# Containers without labels can be named here instead (name or id):
+# [[logs]]
+# app = "searchapi"
+# container = "searchapi"
+# include = "(?i)error|warn|panic|timeout"

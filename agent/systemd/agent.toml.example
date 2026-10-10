@@ -2,6 +2,8 @@
 system_interval_secs = 60
 service_interval_secs = 120
 docker = false
+# Warn line (app "agent") when a disk reaches this % used; error at ≥ 95; 0 = off.
+disk_warn_pct = 85
 
 [[disk]]
 name = "root"
@@ -33,3 +35,31 @@ match = "sshd"
 # name = "mysql-daemon"
 # kind = "process"
 # match = "mysqld"
+
+# MySQL status (DSN in agent.env as TINY_LOG_MYSQL_DSN — see ../bare-metal.example.toml)
+# [[service]]
+# name = "mysql"
+# kind = "mysql_status"
+# dsn_env = "TINY_LOG_MYSQL_DSN"
+# timeout_ms = 3000
+
+# [[service]]
+# name = "host-io"
+# kind = "host_io"
+
+# [[service]]
+# name = "dns"
+# kind = "dns"
+# host = "example.com"
+
+# Log files (the tiny-log-agent user must be able to read them; install.sh adds it to
+# the adm / elasticsearch groups when they exist)
+# [[logs]]
+# app = "mysql"
+# file = "/var/log/mysql/error.log"
+# include = "\\[(ERROR|Warning)\\]"
+#
+# [[logs]]
+# app = "elasticsearch"
+# file = "/var/log/elasticsearch/elasticsearch.log"
+# include = "\\[(WARN|ERROR|FATAL) ?\\]"

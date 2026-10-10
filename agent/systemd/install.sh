@@ -47,8 +47,22 @@ if ! id "$USER_NAME" >/dev/null 2>&1; then
   useradd --system --no-create-home --shell /usr/sbin/nologin "$USER_NAME"
 fi
 
+# [[logs]] file sources: Debian keeps /var/log/mysql/error.log in group adm and
+# /var/log/elasticsearch in group elasticsearch. Read access only; skipped if absent.
+for g in adm elasticsearch; do
+  if getent group "$g" >/dev/null 2>&1; then
+    usermod -aG "$g" "$USER_NAME"
+  fi
+done
+
 install -m 755 "$BIN_SRC" "$BIN_DST"
 mkdir -p "$CONF_DIR"
+
+# Keep a MySQL DSN set by hand on a previous install (kind = "mysql_status").
+MYSQL_DSN_LINE="TINY_LOG_MYSQL_DSN="
+if [ -f "$ENV_FILE" ] && grep -q '^TINY_LOG_MYSQL_DSN=' "$ENV_FILE"; then
+  MYSQL_DSN_LINE="$(grep '^TINY_LOG_MYSQL_DSN=' "$ENV_FILE" | tail -n 1)"
+fi
 
 cat >"$ENV_FILE" <<EOF
 TINY_LOG_URL=$URL
@@ -56,6 +70,8 @@ TINY_LOG_API_KEY=$KEY
 TINY_LOG_HOST_NAME=$HOST
 TINY_LOG_DOCKER=false
 RUST_LOG=info
+# mysql://user:pass@localhost/?socket=/run/mysqld/mysqld.sock  or  mysql://user:pass@127.0.0.1:3306/
+$MYSQL_DSN_LINE
 EOF
 chmod 600 "$ENV_FILE"
 chown root:"$USER_NAME" "$ENV_FILE"
@@ -99,7 +115,9 @@ EOF
 fi
 
 systemctl daemon-reload
-systemctl enable --now tiny-log-agent
+systemctl enable tiny-log-agent
+# restart (not just start): picks up a new binary and new supplementary groups
+systemctl restart tiny-log-agent
 
 echo
 echo "Installed."
