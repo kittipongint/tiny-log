@@ -187,3 +187,64 @@ async fn broadcast_reaches_viewers_and_is_skipped_without_them() {
     assert_eq!(rx.try_recv().unwrap().message, "seen too");
     assert!(rx.try_recv().is_err()); // "quiet" was never queued
 }
+
+fn metrics_batch(host: &str, ts: i64, cpu: f64, status: &str) -> String {
+    json!({
+        "host": host,
+        "timestamp": ts.to_string(),
+        "system": { "cpu_pct": cpu, "mem_used_bytes": 1, "mem_total_bytes": 2 },
+        "services": [{ "name": "web", "kind": "http", "status": status }]
+    })
+    .to_string()
+}
+
+#[tokio::test]
+async fn overview_reads_the_newest_row_per_host_and_service() {
+    let (router, state) = app(test_config(AuthMode::Anonymous, None)).await;
+    let now = chrono::Utc::now().timestamp_millis();
+    for (host, ts, cpu, status) in [
+        ("a", now - 2_000, 10.0, "down"),
+        ("a", now, 30.0, "up"),
+        ("a", now - 1_000, 20.0, "down"), // arrives late: must not replace the newer row
+        ("b", now - 500, 50.0, "up"),
+    ] {
+        let (code, _, _) = call(
+            &router,
+            post_json("/api/v1/metrics/batch", metrics_batch(host, ts, cpu, status)),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+    }
+
+    let req = Request::get("/api/v1/metrics/overview").body(Body::empty()).unwrap();
+    let (code, _, body) = call(&router, req).await;
+    assert_eq!(code, StatusCode::OK);
+    let hosts: Vec<(String, f64)> = body["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| (h["host"].as_str().unwrap().to_string(), h["cpu_pct"].as_f64().unwrap()))
+        .collect();
+    assert_eq!(hosts, [("a".to_string(), 30.0), ("b".to_string(), 50.0)]);
+    let services: Vec<(String, String)> = body["services"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| (s["host"].as_str().unwrap().to_string(), s["status"].as_str().unwrap().to_string()))
+        .collect();
+    assert_eq!(services, [("a".into(), "up".into()), ("b".into(), "up".into())]);
+
+    let req = Request::get("/api/v1/metrics/hosts").body(Body::empty()).unwrap();
+    let (_, _, body) = call(&router, req).await;
+    assert_eq!(body["hosts"], json!(["a", "b"]));
+
+    // Retention drops a host whose newest row is past the cutoff, pointer included.
+    crate::db::metrics::delete_older_than(&state.metrics_db, now - 100).await.unwrap();
+    let req = Request::get("/api/v1/metrics/overview").body(Body::empty()).unwrap();
+    let (_, _, body) = call(&router, req).await;
+    assert_eq!(body["hosts"].as_array().unwrap().len(), 1);
+    assert_eq!(body["services"].as_array().unwrap().len(), 1);
+    let req = Request::get("/api/v1/metrics/hosts").body(Body::empty()).unwrap();
+    let (_, _, body) = call(&router, req).await;
+    assert_eq!(body["hosts"], json!(["a"]));
+}

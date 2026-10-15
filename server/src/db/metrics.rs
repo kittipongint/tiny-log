@@ -200,9 +200,9 @@ pub async fn list_hosts(pool: &SqlitePool) -> AppResult<Vec<String>> {
     let rows: Vec<(String,)> = sqlx::query_as(
         r#"
         SELECT host FROM (
-            SELECT DISTINCT host FROM host_samples
+            SELECT host FROM host_latest
             UNION
-            SELECT DISTINCT host FROM service_checks
+            SELECT host FROM service_latest
         )
         ORDER BY host ASC
         LIMIT 500
@@ -219,12 +219,8 @@ pub async fn latest_host_samples(pool: &SqlitePool) -> AppResult<Vec<HostSample>
         SELECT h.id, h.timestamp_ms, h.host, h.cpu_pct, h.mem_used_bytes, h.mem_total_bytes,
                h.disk_used_bytes, h.disk_total_bytes, h.load1, h.load5, h.load15, h.n_cpus,
                h.disks_json
-        FROM host_samples h
-        INNER JOIN (
-            SELECT host, MAX(timestamp_ms) AS max_ts
-            FROM host_samples
-            GROUP BY host
-        ) latest ON h.host = latest.host AND h.timestamp_ms = latest.max_ts
+        FROM host_latest latest
+        INNER JOIN host_samples h ON h.id = latest.sample_id
         ORDER BY h.host ASC
         "#,
     )
@@ -240,15 +236,8 @@ pub async fn latest_service_checks(pool: &SqlitePool) -> AppResult<Vec<ServiceCh
         SELECT s.id, s.timestamp_ms, s.host, s.service, s.kind, s.status,
                s.latency_ms, s.message, s.meta_json,
                s.cpu_pct, s.mem_used_bytes, s.mem_limit_bytes, s.load_hint, s.recommend
-        FROM service_checks s
-        INNER JOIN (
-            SELECT host, service, MAX(timestamp_ms) AS max_ts
-            FROM service_checks
-            GROUP BY host, service
-        ) latest
-          ON s.host = latest.host
-         AND s.service = latest.service
-         AND s.timestamp_ms = latest.max_ts
+        FROM service_latest latest
+        INNER JOIN service_checks s ON s.id = latest.check_id
         ORDER BY s.host ASC, s.service ASC
         "#,
     )
@@ -401,6 +390,15 @@ pub async fn delete_older_than(pool: &SqlitePool, cutoff_ms: i64) -> AppResult<u
     use crate::db::logs::{delete_in_chunks, DELETE_CHUNK};
     let hosts = delete_in_chunks(pool, "host_samples", cutoff_ms, DELETE_CHUNK).await?;
     let services = delete_in_chunks(pool, "service_checks", cutoff_ms, DELETE_CHUNK).await?;
+    // A host or service that stopped reporting drops off the overview with its last row.
+    sqlx::query("DELETE FROM host_latest WHERE timestamp_ms < ?")
+        .bind(cutoff_ms)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM service_latest WHERE timestamp_ms < ?")
+        .bind(cutoff_ms)
+        .execute(pool)
+        .await?;
     Ok(hosts + services)
 }
 

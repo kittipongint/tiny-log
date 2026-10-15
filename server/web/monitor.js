@@ -11,9 +11,13 @@ const logoutBtn = document.getElementById("logout-btn");
 let selectedHost = null;
 let hostsCache = [];
 
+const API_TIMEOUT_MS = 20000;
+const REFRESH_MS = 30000;
+
 async function api(path, options = {}) {
   const res = await fetch(path, {
     credentials: "same-origin",
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
     ...options,
     headers: {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -479,6 +483,19 @@ async function selectHost(host) {
   renderServices(overview);
 }
 
+function showOverviewError(msg) {
+  hostRows.replaceChildren();
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = 6;
+  td.className = "muted";
+  td.textContent = msg;
+  tr.appendChild(td);
+  hostRows.appendChild(tr);
+  hostDetail.hidden = true;
+  serviceRows.replaceChildren();
+}
+
 async function loadOverview() {
   const res = await api("/api/v1/metrics/overview");
   if (!res.ok) {
@@ -487,16 +504,7 @@ async function loadOverview() {
         ? null
         : `Metrics API error (${res.status}). Check metrics.db / server logs.`;
     if (msg) {
-      hostRows.replaceChildren();
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 6;
-      td.className = "muted";
-      td.textContent = msg;
-      tr.appendChild(td);
-      hostRows.appendChild(tr);
-      hostDetail.hidden = true;
-      serviceRows.replaceChildren();
+      showOverviewError(msg);
       return;
     }
     throw new Error("unauthorized");
@@ -528,10 +536,21 @@ async function boot() {
     window.location.href = "/setup";
     return;
   }
-  await loadOverview();
-  setInterval(() => {
-    loadOverview().catch(console.error);
-  }, 30000);
+  // The next refresh is scheduled only after this one finishes, so a slow server never gets
+  // requests stacked on top of each other.
+  const refresh = async () => {
+    try {
+      await loadOverview();
+    } catch (err) {
+      if (err.message === "unauthorized") throw err;
+      console.error(err);
+      showOverviewError(
+        err.name === "TimeoutError" ? "Metrics API timed out, retrying" : "Metrics API unreachable, retrying",
+      );
+    }
+    setTimeout(() => refresh().catch(() => {}), REFRESH_MS);
+  };
+  await refresh();
 }
 
 boot().catch(() => {
