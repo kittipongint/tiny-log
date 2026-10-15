@@ -39,7 +39,7 @@ services:
       - SETUID
       - SETGID
       - DAC_OVERRIDE
-    mem_limit: 128m
+    mem_limit: 256m  # SQLite caches: logs 5×20 MB + metrics + system; 128m ran out (26-10-15)
     cpus: 0.50
     logging:
       driver: json-file
