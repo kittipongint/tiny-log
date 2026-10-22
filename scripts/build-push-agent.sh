@@ -5,7 +5,7 @@
 #   REGISTRY=ghcr.io/myorg
 #
 # Optional:
-#   VERSION=1.0.1
+#   VERSION=1.0.2
 #   PLATFORMS=linux/amd64,linux/arm64
 #   PUSH=1
 #   LATEST=1
