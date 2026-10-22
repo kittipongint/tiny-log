@@ -43,8 +43,14 @@ docker compose up -d
 ```
 
 Open `http://<host>:3006` and create the admin account on first visit.
-The compose file uses the published image `kittipongint/kintstudio:tiny-log-1.0.0`
-(`linux/amd64`, `linux/arm64`). Data lives in `TINY_LOG_DATA_PATH` (default `./tiny-log-data`).
+There is no published image: build your own first (the compose file expects `tiny-log:1.0.0`):
+
+```bash
+scripts/build-server.sh          # builds tiny-log:<version> locally (linux/amd64)
+```
+
+To use a registry, build with `IMAGE=ghcr.io/you/tiny-log:1.0.0 PUSH=1 scripts/build-server.sh`
+and change `image:` in `server/docker-compose.yml`. Data lives in `TINY_LOG_DATA_PATH` (default `./tiny-log-data`).
 
 Key settings (env):
 
@@ -101,9 +107,10 @@ Set `TINY_LOG_URL` and `TINY_LOG_API_KEY` (same key as the server). Two ways to 
 
 ### Docker
 
-Image: `kittipongint/kintstudio:tiny-log-agent-1.0.0` (`linux/amd64`, `linux/arm64`, Alpine, ~tiny).
+Build the image yourself (Alpine, tiny), then start it:
 
 ```bash
+scripts/build-agent.sh           # builds tiny-log-agent:<version> locally (linux/amd64)
 cd agent
 cp .env.example .env     # TINY_LOG_URL, TINY_LOG_API_KEY, TINY_LOG_HOST_NAME
 docker compose up -d
@@ -167,8 +174,8 @@ Every option is documented in `agent/agent.example.toml`.
 
 | Artifact | Where |
 |---|---|
-| Server image | `kittipongint/kintstudio:tiny-log-<version>` |
-| Agent image | `kittipongint/kintstudio:tiny-log-agent-<version>` |
+| Server image | build it yourself: `scripts/build-server.sh` |
+| Agent image | build it yourself: `scripts/build-agent.sh` |
 | Agent Linux package | GitHub Releases: `tiny-log-agent-<version>-linux-amd64.tar.gz` |
 
 Build scripts live in `scripts/` (`build-push-server.sh`, `build-push-agent.sh`, `build-agent-binary.sh`).

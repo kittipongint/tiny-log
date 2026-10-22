@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Build (+ optional push) tiny-log for Linux from Apple Silicon via buildx.
 #
-# Defaults match Docker Hub style used by this project:
-#   kittipongint/kintstudio:tiny-log-1.0.0
+# Default local image tag:
+#   tiny-log:1.0.0
 #
 # Env:
-#   IMAGE=kittipongint/kintstudio:tiny-log-1.0.0
+#   IMAGE=tiny-log:1.0.0
 #   PLATFORMS=linux/amd64,linux/arm64   # amd64 required for typical VPS
 #   PUSH=0|1                            # 1 = push multi-arch manifest
 #   BUILDER=tiny-log-builder
@@ -15,7 +15,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/server/Cargo.toml" | head -1)}"
 VERSION="${VERSION:-1.0.0}"
-IMAGE="${IMAGE:-kittipongint/kintstudio:tiny-log-${VERSION}}"
+IMAGE="${IMAGE:-tiny-log:${VERSION}}"
 # PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 PLATFORMS="${PLATFORMS:-linux/amd64}"
 PUSH="${PUSH:-0}"
