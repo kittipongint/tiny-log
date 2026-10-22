@@ -43,7 +43,7 @@ docker compose up -d
 ```
 
 Open `http://<host>:3006` and create the admin account on first visit.
-The compose file uses the public image `kittipongint/tiny-log:1.0.0`
+The compose file uses the public image `kittipongint/tiny-log:1.0.1`
 (Docker Hub, `linux/amd64` and `linux/arm64`). Data lives in `TINY_LOG_DATA_PATH` (default `./tiny-log-data`).
 
 To build the image yourself instead: `scripts/build-server.sh` (tags `tiny-log:<version>`; point `image:` at it).
@@ -103,7 +103,7 @@ Set `TINY_LOG_URL` and `TINY_LOG_API_KEY` (same key as the server). Two ways to 
 
 ### Docker
 
-Image: `kittipongint/tiny-log-agent:1.0.0` (Docker Hub, `linux/amd64` and `linux/arm64`, Alpine, tiny).
+Image: `kittipongint/tiny-log-agent:1.0.1` (Docker Hub, `linux/amd64` and `linux/arm64`, Alpine, tiny).
 To build it yourself: `scripts/build-agent.sh`.
 
 ```bash
@@ -130,8 +130,8 @@ Pre-built **glibc `linux/amd64` / `linux/arm64`** package on the [Releases](../.
 (Debian/Ubuntu and similar distros with systemd):
 
 ```bash
-tar xzf tiny-log-agent-1.0.0-linux-amd64.tar.gz
-cd tiny-log-agent-1.0.0-linux-amd64
+tar xzf tiny-log-agent-1.0.1-linux-amd64.tar.gz
+cd tiny-log-agent-1.0.1-linux-amd64
 sudo ./install.sh https://logs.example.com <API_KEY> my-host
 # edit /etc/tiny-log/agent.toml  (see bare-metal.example.toml), then:
 sudo systemctl restart tiny-log-agent

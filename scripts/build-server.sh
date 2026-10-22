@@ -2,10 +2,10 @@
 # Build (+ optional push) tiny-log for Linux from Apple Silicon via buildx.
 #
 # Default local image tag:
-#   tiny-log:1.0.0
+#   tiny-log:1.0.1
 #
 # Env:
-#   IMAGE=tiny-log:1.0.0
+#   IMAGE=tiny-log:1.0.1
 #   PLATFORMS=linux/amd64,linux/arm64   # amd64 required for typical VPS
 #   PUSH=0|1                            # 1 = push multi-arch manifest
 #   BUILDER=tiny-log-builder
@@ -14,7 +14,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/server/Cargo.toml" | head -1)}"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.0.1}"
 IMAGE="${IMAGE:-tiny-log:${VERSION}}"
 # PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 PLATFORMS="${PLATFORMS:-linux/amd64}"

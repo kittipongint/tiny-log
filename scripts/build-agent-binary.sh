@@ -5,13 +5,13 @@
 # Env:
 #   PLATFORMS=linux/amd64          # or linux/arm64
 #   OUT_DIR=dist
-#   VERSION=1.0.0
+#   VERSION=1.0.1
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/agent/Cargo.toml" | head -1)}"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.0.1}"
 PLATFORMS="${PLATFORMS:-linux/amd64}"
 OUT_DIR="${OUT_DIR:-$ROOT/dist}"
 BUILDER="${BUILDER:-tiny-log-builder}"
