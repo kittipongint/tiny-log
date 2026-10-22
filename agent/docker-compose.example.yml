@@ -65,7 +65,7 @@ services:
       tiny-log.logs: "searchapi"
 
   tiny-log-agent:
-    image: tiny-log-agent:latest
+    image: kittipongint/tiny-log-agent:latest
     user: "0:0"
     environment:
       TINY_LOG_URL: ${TINY_LOG_URL:?set TINY_LOG_URL}

@@ -43,14 +43,10 @@ docker compose up -d
 ```
 
 Open `http://<host>:3006` and create the admin account on first visit.
-There is no published image: build your own first (the compose file expects `tiny-log:1.0.0`):
+The compose file uses the public image `kittipongint/tiny-log:1.0.0`
+(Docker Hub, `linux/amd64` and `linux/arm64`). Data lives in `TINY_LOG_DATA_PATH` (default `./tiny-log-data`).
 
-```bash
-scripts/build-server.sh          # builds tiny-log:<version> locally (linux/amd64)
-```
-
-To use a registry, build with `IMAGE=ghcr.io/you/tiny-log:1.0.0 PUSH=1 scripts/build-server.sh`
-and change `image:` in `server/docker-compose.yml`. Data lives in `TINY_LOG_DATA_PATH` (default `./tiny-log-data`).
+To build the image yourself instead: `scripts/build-server.sh` (tags `tiny-log:<version>`; point `image:` at it).
 
 Key settings (env):
 
@@ -107,10 +103,10 @@ Set `TINY_LOG_URL` and `TINY_LOG_API_KEY` (same key as the server). Two ways to 
 
 ### Docker
 
-Build the image yourself (Alpine, tiny), then start it:
+Image: `kittipongint/tiny-log-agent:1.0.0` (Docker Hub, `linux/amd64` and `linux/arm64`, Alpine, tiny).
+To build it yourself: `scripts/build-agent.sh`.
 
 ```bash
-scripts/build-agent.sh           # builds tiny-log-agent:<version> locally (linux/amd64)
 cd agent
 cp .env.example .env     # TINY_LOG_URL, TINY_LOG_API_KEY, TINY_LOG_HOST_NAME
 docker compose up -d
@@ -130,7 +126,7 @@ See `agent/docker.example.toml` and `agent/docker-compose.example.yml` for a ful
 
 ### Linux (bare-metal, systemd)
 
-Pre-built **glibc `linux/amd64`** package on the [Releases](../../releases) page
+Pre-built **glibc `linux/amd64` / `linux/arm64`** package on the [Releases](../../releases) page
 (Debian/Ubuntu and similar distros with systemd):
 
 ```bash
@@ -142,8 +138,7 @@ sudo systemctl restart tiny-log-agent
 ```
 
 Installs to `/usr/local/bin/tiny-log-agent`, config in `/etc/tiny-log/`, runs as an unprivileged
-`tiny-log-agent` user. Remove with `./uninstall.sh`. For `arm64`, build it yourself:
-`PLATFORMS=linux/arm64 scripts/build-agent-binary.sh`.
+`tiny-log-agent` user. Remove with `./uninstall.sh`.
 
 ### Agent config
 
@@ -174,11 +169,13 @@ Every option is documented in `agent/agent.example.toml`.
 
 | Artifact | Where |
 |---|---|
-| Server image | build it yourself: `scripts/build-server.sh` |
-| Agent image | build it yourself: `scripts/build-agent.sh` |
-| Agent Linux package | GitHub Releases: `tiny-log-agent-<version>-linux-amd64.tar.gz` |
+| Server image | Docker Hub `kittipongint/tiny-log:<version>` |
+| Agent image | Docker Hub `kittipongint/tiny-log-agent:<version>` |
+| Agent Linux package | GitHub Releases: `tiny-log-agent-<version>-linux-{amd64,arm64}.tar.gz` |
 
-Build scripts live in `scripts/` (`build-push-server.sh`, `build-push-agent.sh`, `build-agent-binary.sh`).
+Pushing a tag `vX.Y.Z` runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds and
+publishes all of the above. The tag must match the `version` in `server/Cargo.toml` and `agent/Cargo.toml`.
+Manual build scripts live in `scripts/`.
 
 ## Development
 

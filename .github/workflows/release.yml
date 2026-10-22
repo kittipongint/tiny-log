@@ -1,0 +1,135 @@
+name: Release
+
+# Push a tag like v1.0.0 to build and publish:
+#   - Docker Hub images  <user>/tiny-log and <user>/tiny-log-agent  (linux/amd64 + linux/arm64)
+#   - agent Linux tarballs (glibc, amd64 + arm64) attached to the GitHub release
+#
+# Repository settings needed (Settings > Secrets and variables > Actions):
+#   secret   DOCKERHUB_TOKEN      Docker Hub access token with Read & Write
+#   variable DOCKERHUB_USERNAME   Docker Hub namespace, e.g. kittipongint
+#
+# Run manually (Actions > Release > Run workflow) for a dry run: builds, pushes nothing.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Resolve version and check it matches Cargo.toml
+        run: |
+          cargo_server=$(sed -n 's/^version = "\([^"]*\)"/\1/p' server/Cargo.toml | head -1)
+          cargo_agent=$(sed -n 's/^version = "\([^"]*\)"/\1/p' agent/Cargo.toml | head -1)
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            if [[ "$version" != "$cargo_server" || "$version" != "$cargo_agent" ]]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml (server $cargo_server, agent $cargo_agent)"
+              exit 1
+            fi
+          else
+            version="$cargo_server"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  images:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: tiny-log
+            context: server
+          - name: tiny-log-agent
+            context: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ vars.DOCKERHUB_USERNAME }}/${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=dry-run,enable=${{ github.ref_type != 'tag' }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.ref_type == 'tag' }}
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  agent-binary:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build agent tarball
+        env:
+          PLATFORMS: linux/${{ matrix.arch }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: scripts/build-agent-binary.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tiny-log-agent-linux-${{ matrix.arch }}
+          path: dist/tiny-log-agent-*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [images, agent-binary]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tiny-log-agent-linux-*
+          merge-multiple: true
+          path: assets
+      - name: Attach tarballs to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # --clobber replaces an asset of the same name; the release text is left as written.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" assets/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" assets/* --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
