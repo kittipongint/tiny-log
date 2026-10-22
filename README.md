@@ -5,6 +5,10 @@ One Rust binary, one container, a few SQLite files, a vanilla-JS web UI. No Post
 
 > Logging-focused by design — not an APM platform.
 
+![Logs page: live tail, filters, agent-shipped Docker lines](docs/screenshots/logs.png)
+
+![Monitor page: systems, disks and service checks](docs/screenshots/monitor.png)
+
 ## Features
 
 - **Log ingest** over HTTP (single + batch), with levels, app name, source, trace id and free-form `meta`
