@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Tiny Log API",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "description": "Test log ingest and host/service monitoring.\n\n**Write APIs** need `Authorize` with Bearer API key (`TINY_LOG_API_KEY`) or client token (`TINY_LOG_CLIENT_TOKEN`).\n\n**Read APIs** need an admin session cookie (login first) unless `TINY_LOG_AUTH_MODE=anonymous`."
   },
   "servers": [

@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v1.0.2 to build and publish:
+# Push a tag like v1.0.3 to build and publish:
 #   - Docker Hub images  <user>/tiny-log and <user>/tiny-log-agent  (linux/amd64 + linux/arm64, built natively per arch)
 #   - agent Linux tarballs (glibc, amd64 + arm64) attached to the GitHub release
 #

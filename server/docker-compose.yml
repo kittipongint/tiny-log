@@ -1,6 +1,6 @@
 services:
   tiny-log:
-    image: kittipongint/tiny-log:1.0.2
+    image: kittipongint/tiny-log:1.0.3
     container_name: tiny-log
     restart: unless-stopped
     stop_grace_period: 30s

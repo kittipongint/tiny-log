@@ -2,10 +2,10 @@
 # Build (+ optional push) tiny-log-agent for Linux from Apple Silicon via buildx.
 #
 # Defaults:
-#   tiny-log-agent:1.0.2
+#   tiny-log-agent:1.0.3
 #
 # Env:
-#   IMAGE=tiny-log-agent:1.0.2
+#   IMAGE=tiny-log-agent:1.0.3
 #   PLATFORMS=linux/amd64,linux/arm64
 #   PUSH=0|1
 #   BUILDER=tiny-log-builder
@@ -14,7 +14,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/agent/Cargo.toml" | head -1)}"
-VERSION="${VERSION:-1.0.2}"
+VERSION="${VERSION:-1.0.3}"
 IMAGE="${IMAGE:-tiny-log-agent:${VERSION}}"
 # PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 PLATFORMS="linux/amd64"
